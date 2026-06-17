@@ -1,0 +1,539 @@
+<!doctype html><html><head><meta charset="utf-8"><title>quant-arena</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;color:#222}
+  h1{font-size:16px;margin:10px 14px 2px}
+  #top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:8px 14px;border-bottom:1px solid #eee}
+  #top label{font-size:12px;color:#555}
+  #top select{font-size:13px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
+  #status{font-size:12px;color:#888}
+  nav#tabs{display:flex;gap:4px;padding:6px 14px 0}
+  nav#tabs button{font-size:13px;padding:5px 12px;border:1px solid #ddd;border-bottom:none;background:#f4f4f6;border-radius:6px 6px 0 0;cursor:pointer}
+  nav#tabs button.active{background:#fff;font-weight:600}
+  #bar{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:8px 14px;border-top:1px solid #eee;border-bottom:1px solid #eee}
+  #bar label{font-size:12px;color:#555}
+  #bar select,#bar input[type=text]{font-size:13px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
+  .ctl{display:flex;gap:5px;align-items:center}
+  .chk{font-size:12px;color:#555;display:flex;gap:3px;align-items:center}
+  #fig{width:100%;height:600px}
+  #fig.drag{outline:3px dashed #1f77b4;outline-offset:-6px}
+  .hint{font:12px system-ui;color:#666;padding:4px 14px 10px}
+  /* table tab */
+  #tab-table{padding:8px 14px 18px}
+  #tq{padding:6px 10px;font-size:13px;width:240px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:13px;width:100%}
+  th,td{padding:6px 10px;text-align:right;white-space:nowrap}
+  th{background:#f4f4f6;cursor:pointer;user-select:none;position:sticky;top:0;border-bottom:2px solid #ddd}
+  th:hover{background:#e9e9ee}
+  th .arr{color:#999;font-size:10px;margin-left:3px}
+  td.method,th.method{text-align:left}
+  tr:nth-child(even) td{background:#fafafa}
+  tr:hover td{background:#eef5ff}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .fam{text-align:left;color:#444}
+</style></head><body>
+<!-- Single-run data is injected into the block below by `qa dashboard`; on the
+     committed site the placeholder stays put, JSON.parse fails, and we go global. -->
+<script type="application/json" id="embedded">__EMBED__</script>
+
+<h1 id="title">quant-arena</h1>
+<div id="top">
+  <div class="ctl" id="expctl"><label>experiment</label><select id="expsel"></select></div>
+  <div class="ctl"><label>dataset</label><select id="dssel"></select></div>
+  <span id="status"></span>
+</div>
+<nav id="tabs">
+  <button data-tab="explore" class="active">Explore</button>
+  <button data-tab="table">Table</button>
+</nav>
+
+<section id="tab-explore">
+  <div id="bar">
+    <div class="ctl"><label>X</label><select id="xsel"></select>
+      <span class="chk"><input type="checkbox" id="xlog"><label for="xlog">log</label></span></div>
+    <div class="ctl"><label>Y</label><select id="ysel"></select>
+      <span class="chk"><input type="checkbox" id="ylog"><label for="ylog">log</label></span></div>
+    <div class="ctl"><label>k</label><select id="ksel"></select></div>
+    <div class="ctl"><label>t</label><select id="tsel"></select></div>
+    <div class="ctl"><label>group</label><select id="gsel">
+      <option value="family">family</option><option value="method">method</option></select></div>
+    <span class="chk"><input type="checkbox" id="leg" checked><label for="leg">legend</label></span>
+    <div class="ctl"><label>filter</label><input type="text" id="q" placeholder="e.g. PQ, EDEN, B=4"></div>
+    <div class="ctl"><label>data</label><input type="file" id="file" accept=".json,application/json"></div>
+  </div>
+  <div id="fig"></div>
+  <div class="hint">Pick axes to explore · click a legend entry to toggle, double-click to isolate ·
+    drag a box to zoom, double-click to reset · drop a JSON on the chart (or use the file picker) to load another run.</div>
+</section>
+
+<section id="tab-table" hidden>
+  <input id="tq" placeholder="filter (e.g. PQ, EDEN, B=4)…">
+  <table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table>
+</section>
+
+<script>
+// Stable color per family (family = first whitespace token of the label).
+const COLORS = {
+  // RaBitQ family — oranges
+  "RaBitQ":"#e6550d", "E-RaBitQ":"#fdae6b",
+  // EDEN family — greens
+  "EDEN-biased":"#238b45", "EDEN-unbiased":"#74c476",
+  // TurboQuant family — purples
+  "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
+  // Hadamard-rotation family — blues
+  "Hada-LDLQ":"#08519c", "Hada-E8":"#6baed6",
+  // singletons — distinct hues
+  "PQ":"#000000",      // black
+  "SimHash":"#008b8b", // dark teal
+  "QJL":"#bcbd22",     // olive
+  "NF4":"#8c564b",     // brown
+  "KIVI":"#fb9a99",    // salmon
+  "GEAR":"#7f7f7f",    // gray
+  "Int":"#e7298a",     // magenta-pink
+  "Scalar":"#d62728",  // red
+  "MinMax":"#bf9000",  // gold
+  // legacy EDEN variants kept for older result files (no collision with above)
+  "EDEN":"#2ca02c","EDEN-optT":"#3182bd","EDEN-ideal":"#98df8a",
+  "EDEN-PQ":"#a63603","EDEN-PQ-optT":"#e377c2","EDEN-PQ-ideal":"#c49c94",
+  "EDEN-PQ-ideal-optT":"#f7b6d2"
+};
+// Fallback for any future family not listed above — broadened so new methods
+// don't immediately collide.
+const PALETTE = ["#393b79","#637939","#8c6d31","#843c39","#7b4173",
+                 "#5254a3","#8ca252","#bd9e39","#ad494a","#a55194"];
+
+// Axis fields: group (dropdown <optgroup>), label, default scale, accessor, hover format.
+const FIELDS = {
+  bits:     {group:"Size & memory", label:"bits / dim",              log:false, get:r=>r.bits,      d3:".3f"},
+  model_bits:{group:"Size & memory", label:"model bits / dim",       log:false, get:r=>r.model_bits, d3:".3f"},
+  code_bits: {group:"Size & memory", label:"code bits / dim",        log:false, get:r=>r.code_bits,  d3:".3f"},
+  mem:      {group:"Size & memory", label:"peak memory (MB)",        log:false, get:r=>r.mem,       d3:".2f"},
+  enc_mem:  {group:"Size & memory", label:"encode memory (MB)",      log:false, get:r=>r.enc_mem,   d3:".2f"},
+  enc_s:    {group:"Time",          label:"encode time (s)",         log:false, get:r=>r.enc_s,     d3:".3f"},
+  score_avg:{group:"Time",          label:"scoring avg (µs)",        log:false, get:r=>r.score_avg, d3:".2f"},
+  score_p50:{group:"Time",          label:"scoring p50 (µs)",        log:false, get:r=>r.score_p50, d3:".2f"},
+  score_p90:{group:"Time",          label:"scoring p90 (µs)",        log:false, get:r=>r.score_p90, d3:".2f"},
+  score_p99:{group:"Time",          label:"scoring p99 (µs)",        log:false, get:r=>r.score_p99, d3:".2f"},
+  recon_us: {group:"Time",          label:"reconstruction time (µs)",log:false, get:r=>r.recon_us,  d3:".2f"},
+  recall:   {group:"Quality",       label:"recall@k",                log:false, perK:true, get:(r,k)=>r.recalls[k], d3:".4f"},
+  sos:      {group:"Quality",       label:"SOS@k (score ratio)",     log:false, perK:true, get:(r,k)=>r.sos[k],     d3:".4f"},
+  mse:      {group:"Quality",       label:"score MSE",               log:true,  get:r=>r.mse,       d3:".2e"},
+  bias:     {group:"Quality",       label:"score bias",              log:false, get:r=>r.bias,      d3:".2e"},
+  exp:      {group:"Quality",       label:"score exp-MSE@{t}",       log:true,  perT:true, get:(r,t)=>r.exp[t], d3:".2e"},
+  kl:       {group:"Quality",       label:"attention KL (τ={t})", log:true,  perT:true, get:(r,t)=>r.kl[t],  d3:".2e"},
+  l1:       {group:"Quality",       label:"attention TV (τ={t})", log:false, perT:true, get:(r,t)=>r.l1[t]/2,  d3:".4f"},
+  recon:    {group:"Quality",       label:"reconstruction MSE",      log:true,  get:r=>r.recon,     d3:".2e"},
+  recon_bias:{group:"Quality",      label:"reconstruction bias",     log:true,  get:r=>r.recon_bias,d3:".2e"},
+};
+const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","mse","bias","exp","kl","l1","recon","recon_bias"];
+const GROUP_ORDER = ["Size & memory","Time","Quality"];
+
+function family(label){ const p=label.split(/\s+/); return p.length?p[0]:label; }
+
+// One dataset block ({dataset, sim, methods:[...]}) + experiment meta (ks,
+// temperatures) → per-method records the views expect.
+function parseDataset(block, meta){
+  const ks = ((meta && meta.ks) || []).slice().sort((a,b)=>a-b);
+  const tset = new Set(((meta && meta.temperatures) || []).map(Number));
+  let hasSos = false;
+  const rows = (block.methods || []).map(d=>{
+    const su = d.score_us || {};
+    const recalls = {}, sos = {}, exp = {}, kl = {}, l1 = {};
+    for(const [k,v] of Object.entries(d.recalls || {})) recalls[+k] = v;
+    for(const [k,v] of Object.entries(d.sos || {})) { sos[+k] = v; hasSos = true; }
+    for(const [t,v] of Object.entries(d.score_exp_mse || {})) { exp[+t] = v; tset.add(+t); }
+    for(const [t,v] of Object.entries(d.score_kl || {}))      { kl[+t]  = v; tset.add(+t); }
+    for(const [t,v] of Object.entries(d.score_l1 || {}))      { l1[+t]  = v; tset.add(+t); }
+    return {
+      method:d.label, family:family(d.label),
+      bits: d.bits_per_dim ?? null,
+      model_bits: d.model_bits_per_dim ?? null,
+      code_bits:  d.code_bits_per_dim ?? null,
+      mem:     d.peak_bytes        != null ? d.peak_bytes/1e6        : null,
+      enc_mem: d.encode_peak_bytes != null ? d.encode_peak_bytes/1e6 : null,
+      enc_s:   d.encode_s ?? null,
+      score_avg: su.avg ?? null, score_p50: su.p50 ?? null,
+      score_p90: su.p90 ?? null, score_p99: su.p99 ?? null,
+      recon_us: d.recon_us ?? null,
+      mse: d.mse_score ?? null, bias: d.score_bias ?? null,
+      exp, kl, l1, recon: d.recon_mse ?? null, recon_bias: d.recon_bias ?? null,
+      recalls, sos,
+    };
+  });
+  const temps = [...tset].sort((a,b)=>a-b);
+  return { rows, ks, temps, hasSos };
+}
+
+let DATA = null, famColor = {};
+
+function assignColors(rows){
+  famColor = {}; let fb = 0;
+  for(const r of rows){ if(!(r.family in famColor)){ famColor[r.family] = COLORS[r.family] || PALETTE[fb++ % PALETTE.length]; } }
+}
+
+// ── Explore tab (scatter) ───────────────────────────────────────────────────────
+function availFields(){
+  const present = {}; for(const f of FIELD_ORDER) present[f]=false;
+  const k0 = DATA.ks.length ? DATA.ks[0] : null;
+  const t0 = DATA.temps.length ? DATA.temps[0] : null;
+  for(const r of DATA.rows){
+    for(const f of FIELD_ORDER){
+      const fd = FIELDS[f];
+      const v = fd.perK ? (k0!=null ? fd.get(r,k0) : null)
+              : fd.perT ? (t0!=null ? fd.get(r,t0) : null)
+              : fd.get(r);
+      if(v!=null) present[f]=true;
+    }
+  }
+  return FIELD_ORDER.filter(f=>present[f]);
+}
+
+function fillAxis(sel, fields, want){
+  const keep = fields.includes(sel.value) ? sel.value : (fields.includes(want) ? want : fields[0]);
+  sel.innerHTML = "";
+  for(const g of GROUP_ORDER){
+    const inGroup = fields.filter(f=>FIELDS[f].group===g);
+    if(!inGroup.length) continue;
+    const og = document.createElement("optgroup"); og.label = g;
+    for(const f of inGroup){ const o=document.createElement("option"); o.value=f; o.textContent=FIELDS[f].label; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  sel.value = keep;
+}
+
+function setData(parsed){
+  DATA = parsed; assignColors(DATA.rows);
+  const fields = availFields();
+  fillAxis(document.getElementById("xsel"), fields, "bits");
+  fillAxis(document.getElementById("ysel"), fields, "recall");
+  const ksel = document.getElementById("ksel"); const keepK = ksel.value;
+  ksel.innerHTML = "";
+  for(const k of DATA.ks){ const o=document.createElement("option"); o.value=k; o.textContent=k; ksel.appendChild(o); }
+  ksel.value = DATA.ks.includes(+keepK) ? keepK : (DATA.ks.includes(10) ? 10 : (DATA.ks[DATA.ks.length-1] ?? ""));
+  const tsel = document.getElementById("tsel"); const keepT = tsel.value;
+  tsel.innerHTML = "";
+  for(const t of DATA.temps){ const o=document.createElement("option"); o.value=t; o.textContent=t; tsel.appendChild(o); }
+  tsel.value = DATA.temps.includes(+keepT) ? keepT : (DATA.temps.includes(1) ? 1 : (DATA.temps[0] ?? ""));
+  document.getElementById("xlog").checked = FIELDS[document.getElementById("xsel").value].log;
+  document.getElementById("ylog").checked = FIELDS[document.getElementById("ysel").value].log;
+  redraw();
+}
+
+// Resolve an axis label, substituting the active k / temperature into per-k /
+// per-t metric names ("recall@k" → "recall@10").
+function axisTitle(field, k, t){
+  let s = FIELDS[field].label;
+  if(FIELDS[field].perK && Number.isFinite(k)) s = s.replace("@k", "@"+k);
+  if(FIELDS[field].perT && Number.isFinite(t)) s = s.replace("{t}", t);
+  return s;
+}
+
+function axisLayout(vals, field, log, label){
+  const ax = {
+    title:{text:(label ?? FIELDS[field].label) + (log?" (log)":""), font:{size:26, weight:700, color:"#111"}, standoff:18},
+    showgrid:true, gridcolor:"#e2e2e2", zeroline:false, autorange:false,
+    showline:true, linecolor:"#222", linewidth:2.6, mirror:true,
+    ticks:"outside", tickcolor:"#222", ticklen:8, tickwidth:2, tickfont:{size:21, weight:600, color:"#222"},
+  };
+  const v = vals.filter(x=>x!=null && (!log || x>0));
+  if(field==="recall" && !log){ ax.range=[0,1.02]; return ax; }
+  if(!v.length){ ax.autorange=true; return ax; }
+  const mn=Math.min(...v), mx=Math.max(...v);
+  if(log){
+    // One label per decade as 10ⁿ (power format); 2×/5× become faint unlabeled
+    // minor gridlines + short ticks for reference.
+    Object.assign(ax, {
+      type:"log", range:[Math.log10(mn)-0.3, Math.log10(mx)+0.3],
+      dtick:1, exponentformat:"power", showexponent:"all",
+      minor:{showgrid:true, gridcolor:"#f0f0f0", ticks:"outside", ticklen:4, tickwidth:1.4, tickcolor:"#999"},
+    });
+    return ax;
+  }
+  const span=mx-mn, pad = span>0 ? span*0.05 : (Math.abs(mx)*0.05 || 1);
+  ax.range=[mn-pad,mx+pad]; return ax;
+}
+
+// Lift the live legend <g> out of the rendered plot into a tightly-cropped
+// standalone SVG — handy for placing one shared legend across subfigures.
+// Reflects exactly what's shown (colors, thick line swatches, toggled entries).
+function buildLegendSVG(gd){
+  const legend = gd.querySelector("g.legend");
+  if(!legend) return null;
+  const NS = "http://www.w3.org/2000/svg", pad = 6;
+  const bb = legend.getBBox();                 // legend-local coords (ignores the g's own transform)
+  const W = Math.ceil(bb.width)+2*pad, H = Math.ceil(bb.height)+2*pad;
+  const svg = document.createElementNS(NS,"svg");
+  svg.setAttribute("xmlns", NS);
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", `${bb.x-pad} ${bb.y-pad} ${W} ${H}`);
+  const bg = document.createElementNS(NS,"rect");
+  bg.setAttribute("x",bb.x-pad); bg.setAttribute("y",bb.y-pad);
+  bg.setAttribute("width",W); bg.setAttribute("height",H); bg.setAttribute("fill","white");
+  svg.appendChild(bg);
+  const clone = legend.cloneNode(true);
+  clone.removeAttribute("transform");          // align children with our viewBox
+  clone.removeAttribute("clip-path");          // drop dangling scroll-clip refs (defs not carried over)
+  clone.querySelectorAll("[clip-path]").forEach(el=>el.removeAttribute("clip-path"));
+  clone.querySelectorAll(".scrollbar").forEach(el=>el.remove()); // drop Plotly's legend scrollbar rect
+  clone.querySelectorAll("rect.bg").forEach(el=>el.remove());    // drop Plotly's legend border/box (our white bg suffices)
+  svg.appendChild(clone);
+  return svg;
+}
+function downloadLegendSVG(gd){
+  const svg = buildLegendSVG(gd);
+  if(!svg){ alert("Turn the legend on (the “legend” checkbox) before exporting it."); return; }
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(svg);
+  const a = document.createElement("a");
+  a.href = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  a.download = "quant-arena-legend.svg"; a.click();
+}
+
+function redraw(){
+  if(!DATA) return;
+  const prev = document.getElementById("fig");
+  const vis = {};
+  if(prev && prev.data) for(const t of prev.data){ if(t.visible!==undefined) vis[t.name]=t.visible; }
+  const xf=document.getElementById("xsel").value, yf=document.getElementById("ysel").value;
+  const k=parseInt(document.getElementById("ksel").value,10);
+  const t=parseFloat(document.getElementById("tsel").value);
+  const xlog=document.getElementById("xlog").checked, ylog=document.getElementById("ylog").checked;
+  const grp=document.getElementById("gsel").value;
+  const filt=document.getElementById("q").value.toLowerCase();
+  const isPerK = (FIELDS[xf].perK || FIELDS[yf].perK);
+  const isPerT = (FIELDS[xf].perT || FIELDS[yf].perT);
+  document.getElementById("ksel").disabled = !isPerK;
+  document.getElementById("tsel").disabled = !isPerT;
+
+  const acc = (f,r) => FIELDS[f].perK ? FIELDS[f].get(r,k) : FIELDS[f].perT ? FIELDS[f].get(r,t) : FIELDS[f].get(r);
+  const gx = r => acc(xf,r);
+  const gy = r => acc(yf,r);
+  const ok = (x,y) => x!=null && y!=null && (!xlog||x>0) && (!ylog||y>0);
+  const rows = DATA.rows.filter(r => r.method.toLowerCase().includes(filt) || r.family.toLowerCase().includes(filt));
+
+  const traces=[], xs=[], ys=[];
+  const hov = `%{text}<br>${FIELDS[xf].label}=%{x:${FIELDS[xf].d3}}<br>${FIELDS[yf].label}=%{y:${FIELDS[yf].d3}}<extra></extra>`;
+  if(grp==="family"){
+    const fams=[], seen=new Set();
+    for(const r of rows){ if(!seen.has(r.family)){ seen.add(r.family); fams.push(r.family); } }
+    for(const fam of fams){
+      const pts = rows.filter(r=>r.family===fam).map(r=>[gx(r),gy(r),r.method]).filter(p=>ok(p[0],p[1])).sort((a,b)=>a[0]-b[0]);
+      if(!pts.length) continue;
+      pts.forEach(p=>{xs.push(p[0]);ys.push(p[1]);});
+      traces.push({x:pts.map(p=>p[0]),y:pts.map(p=>p[1]),text:pts.map(p=>p[2]),mode:"lines+markers",
+        name:fam,legendgroup:fam,line:{color:famColor[fam],width:4.5},
+        marker:{color:famColor[fam],size:10,line:{width:1,color:"#fff"}},hovertemplate:hov});
+    }
+  } else {
+    for(const r of rows){
+      const x=gx(r), y=gy(r); if(!ok(x,y)) continue;
+      xs.push(x); ys.push(y);
+      traces.push({x:[x],y:[y],text:[r.method],mode:"markers",name:r.method,legendgroup:r.family,
+        marker:{color:famColor[r.family],size:11,line:{width:1,color:"#fff"}},hovertemplate:hov});
+    }
+  }
+
+  const shapes=[];
+  if(yf==="recall") shapes.push({type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:0.9,y1:0.9,line:{color:"#bbb",dash:"dash",width:1}});
+  if(xf==="recall") shapes.push({type:"line",yref:"paper",y0:0,y1:1,xref:"x",x0:0.9,x1:0.9,line:{color:"#bbb",dash:"dash",width:1}});
+
+  const showleg = document.getElementById("leg").checked; // unchecked → legend gone from view & downloads
+  const layout = {
+    font:{family:"'Helvetica Neue',Helvetica,Arial,sans-serif", size:21, color:"#222"},
+    hovermode:"closest", showlegend:showleg,
+    legend:{groupclick:"togglegroup", bgcolor:"rgba(255,255,255,0.92)", bordercolor:"#ccc", borderwidth:1, font:{size:20}},
+    margin:{l:116,r:showleg?240:30,t:20,b:88}, plot_bgcolor:"white", paper_bgcolor:"white",
+    xaxis: axisLayout(xs,xf,xlog,axisTitle(xf,k,t)), yaxis: axisLayout(ys,yf,ylog,axisTitle(yf,k,t)), shapes,
+  };
+  for(const tr of traces) if(tr.name in vis) tr.visible = vis[tr.name];
+  const fname = `quant-arena-${yf}-vs-${xf}`;
+  Plotly.react("fig", traces, layout, {
+    responsive:true, displaylogo:false,
+    toImageButtonOptions:{format:"svg", filename:fname},           // vector by default — paste straight into LaTeX
+    modeBarButtonsToAdd:[
+      { name:"Download PNG (3×)", icon:Plotly.Icons.camera,         // hi-res raster fallback
+        click:gd=>Plotly.downloadImage(gd,{format:"png", scale:3, filename:fname}) },
+      { name:"Download legend (SVG)", icon:Plotly.Icons.disk,       // just the legend, tightly cropped
+        click:gd=>downloadLegendSVG(gd) },
+    ],
+  });
+}
+
+// ── Table tab ─────────────────────────────────────────────────────────────────
+const TABLE_METRICS = [
+  ["mem",      "peak mem (MB)",   "num2", r=>r.mem],
+  ["enc_mem",  "encode mem (MB)", "num2", r=>r.enc_mem],
+  ["enc_s",    "encode (s)",      "num3", r=>r.enc_s],
+  ["score_p50","score p50 (µs)",  "num2", r=>r.score_p50],
+  ["score_p90","score p90 (µs)",  "num2", r=>r.score_p90],
+  ["score_p99","score p99 (µs)",  "num2", r=>r.score_p99],
+  ["recon_us", "recon (µs)",      "num2", r=>r.recon_us],
+  ["mse",      "MSE",             "sci",  r=>r.mse],
+  ["bias",     "bias",            "sci",  r=>r.bias],
+  ["recon",    "recon MSE",       "sci",  r=>r.recon],
+  ["recon_bias","recon bias",     "sci",  r=>r.recon_bias],
+];
+let TCOLS = [], tSortKey = null, tSortDir = 1;
+
+function tg(t){ return Number.isInteger(t) ? String(t) : String(t); } // "1","0.5","2"
+
+function buildTableCols(){
+  const rows = DATA.rows;
+  const any = get => rows.some(r => get(r) != null);
+  const cols = [
+    {key:"method", label:"Method", kind:"text", get:r=>r.method},
+    {key:"family", label:"Family", kind:"fam",  get:r=>r.family},
+    {key:"bits",   label:"bits/dim", kind:"num3", get:r=>r.bits},
+  ];
+  if(any(r=>r.model_bits!=null)) cols.push({key:"model_bits", label:"model b/d", kind:"num3", get:r=>r.model_bits});
+  if(any(r=>r.code_bits!=null))  cols.push({key:"code_bits",  label:"code b/d",  kind:"num3", get:r=>r.code_bits});
+  for(const [key,label,kind,get] of TABLE_METRICS) if(any(get)) cols.push({key,label,kind,get});
+  for(const t of DATA.temps) if(any(r=>r.exp[t]!=null)) cols.push({key:`exp@${t}`,label:`exp-MSE@${tg(t)}`,kind:"sci",get:r=>r.exp[t]});
+  for(const t of DATA.temps) if(any(r=>r.kl[t]!=null))  cols.push({key:`kl@${t}`, label:`attn KL (τ=${tg(t)})`, kind:"sci",get:r=>r.kl[t]});
+  for(const t of DATA.temps) if(any(r=>r.l1[t]!=null))  cols.push({key:`l1@${t}`, label:`attn TV (τ=${tg(t)})`, kind:"num3",get:r=>r.l1[t]/2});
+  for(const k of DATA.ks) cols.push({key:`r${k}`, label:`R@${k}`, kind:"recall", get:r=>r.recalls[k]});
+  if(DATA.hasSos) for(const k of DATA.ks) cols.push({key:`s${k}`, label:`SOS@${k}`, kind:"recall", get:r=>r.sos[k]});
+  return cols;
+}
+
+function heat(v){
+  if(v==null) return "";
+  const t=Math.max(0,Math.min(1,v));
+  const r=Math.round(255-(255-46)*t), g=Math.round(255-(255-160)*t), b=Math.round(255-(255-44)*t);
+  return `background:rgba(${r},${g},${b},0.5)`;
+}
+function fmt(v,kind){
+  if(v==null) return "";
+  if(kind==="num3") return v.toFixed(3);
+  if(kind==="num2") return v.toFixed(2);
+  if(kind==="sci")  return v.toExponential(3);
+  if(kind==="recall") return v.toFixed(4);
+  return v;
+}
+function tableHeader(){
+  const hr=document.getElementById("hr"); hr.innerHTML="";
+  for(const c of TCOLS){
+    const th=document.createElement("th");
+    th.className = c.key==="method"?"method":"";
+    const arr = tSortKey===c.key ? (tSortDir>0?"▲":"▼") : "";
+    th.innerHTML = c.label + ` <span class="arr">${arr}</span>`;
+    th.onclick=()=>{ if(tSortKey===c.key) tSortDir=-tSortDir; else {tSortKey=c.key; tSortDir=(c.kind==="text"||c.kind==="fam")?1:-1;} tableRender(); };
+    hr.appendChild(th);
+  }
+}
+function tableRender(){
+  const f=document.getElementById("tq").value.toLowerCase();
+  let rs=DATA.rows.filter(r=> r.method.toLowerCase().includes(f) || r.family.toLowerCase().includes(f));
+  const col = TCOLS.find(c=>c.key===tSortKey);
+  if(col){
+    rs.sort((a,b)=>{
+      let x=col.get(a), y=col.get(b);
+      if(x==null) return 1; if(y==null) return -1;
+      if(typeof x==="string") return tSortDir*x.localeCompare(y);
+      return tSortDir*(x-y);
+    });
+  }
+  const tb=document.getElementById("tb"); tb.innerHTML="";
+  for(const r of rs){
+    const tr=document.createElement("tr");
+    for(const c of TCOLS){
+      const td=document.createElement("td");
+      if(c.key==="method"){ td.className="method"; td.innerHTML=`<span class="dot" style="background:${famColor[r.family]}"></span>${r.method}`; }
+      else if(c.key==="family"){ td.className="fam"; td.textContent=r.family; }
+      else { const v=c.get(r); td.textContent=fmt(v,c.kind); if(c.kind==="recall") td.style.cssText=heat(v); }
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+}
+function buildTable(){ TCOLS = buildTableCols(); tableHeader(); tableRender(); }
+
+// ── render: an experiment, one dataset at a time ────────────────────────────────
+let CURRENT_EXP = null;
+
+function renderDataset(idx){
+  const exp = CURRENT_EXP; if(!exp || !exp.datasets || !exp.datasets[idx]) return;
+  const block = exp.datasets[idx];
+  setData(parseDataset(block, exp.meta || {}));
+  buildTable();
+  const h = [(exp.meta||{}).name, block.dataset, block.sim, block.db_size]
+    .filter(x=>x!=null && x!=="").join(" · ");
+  document.getElementById("title").textContent = h;
+  document.title = "quant-arena · " + h;
+}
+
+function loadExperiment(exp){
+  CURRENT_EXP = exp;
+  const dssel = document.getElementById("dssel");
+  dssel.innerHTML = "";
+  (exp.datasets || []).forEach((d,i)=>{
+    const o=document.createElement("option"); o.value=i;
+    o.textContent=`${d.dataset} · ${d.sim} · ${d.db_size}`; dssel.appendChild(o);
+  });
+  dssel.onchange = ()=> renderDataset(+dssel.value);
+  if((exp.datasets||[]).length) renderDataset(0);
+}
+
+// ── tabs ────────────────────────────────────────────────────────────────────────
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x===b));
+  document.getElementById("tab-explore").hidden = b.dataset.tab !== "explore";
+  document.getElementById("tab-table").hidden   = b.dataset.tab !== "table";
+  if(b.dataset.tab==="explore" && DATA) Plotly.Plots.resize("fig"); // Plotly mis-sizes if drawn while hidden
+});
+
+// ── explore-tab control wiring ──────────────────────────────────────────────────
+const xsel=document.getElementById("xsel"), ysel=document.getElementById("ysel");
+xsel.onchange=()=>{ document.getElementById("xlog").checked=FIELDS[xsel.value].log; redraw(); };
+ysel.onchange=()=>{ document.getElementById("ylog").checked=FIELDS[ysel.value].log; redraw(); };
+for(const id of ["xlog","ylog","ksel","tsel","gsel","leg"]) document.getElementById(id).addEventListener("change", redraw);
+document.getElementById("q").addEventListener("input", redraw);
+document.getElementById("tq").addEventListener("input", tableRender);
+
+function loadFile(file){
+  const reader = new FileReader();
+  reader.onload = e => loadExperiment(JSON.parse(e.target.result));
+  reader.readAsText(file);
+}
+document.getElementById("file").addEventListener("change", e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); });
+const fig = document.getElementById("fig");
+fig.addEventListener("dragover", e=>{ e.preventDefault(); fig.classList.add("drag"); });
+fig.addEventListener("dragleave", ()=> fig.classList.remove("drag"));
+fig.addEventListener("drop", e=>{ e.preventDefault(); fig.classList.remove("drag"); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+
+// ── global mode: fetch the manifest, list experiments, fetch the selected one ────
+function status(msg){ document.getElementById("status").textContent = msg; }
+async function enterGlobal(){
+  const sel = document.getElementById("expsel");
+  let man;
+  try { man = await (await fetch("results/manifest.json")).json(); }
+  catch { status("results/manifest.json not found — publish a run (qa publish) then serve over HTTP."); document.getElementById("expctl").style.display="none"; return; }
+  const runs = (man.runs || []);
+  if(!runs.length){ status("no experiments published yet — qa publish <run.json>, then commit."); document.getElementById("expctl").style.display="none"; return; }
+  sel.innerHTML = "";
+  runs.forEach((r,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=r.name; sel.appendChild(o); });
+  async function load(i){
+    const r = runs[i];
+    status(`loading ${r.path} …`);
+    try { const exp = await (await fetch("results/"+r.path)).json(); loadExperiment(exp); status(`${runs.length} experiment(s) · ${(r.datasets||[]).length} dataset(s)`); }
+    catch { status(`failed to load results/${r.path}`); }
+  }
+  sel.onchange = ()=> load(+sel.value);
+  load(0);
+}
+
+// ── bootstrap: embedded single experiment, or global manifest ───────────────────
+(function(){
+  const raw = document.getElementById("embedded").textContent.trim();
+  let embedded = null;
+  try { embedded = raw ? JSON.parse(raw) : null; } catch { embedded = null; }
+  if(embedded){
+    document.getElementById("expctl").style.display = "none"; // experiment fixed in single-run mode
+    loadExperiment(embedded);
+  } else {
+    enterGlobal();
+  }
+})();
+</script></body></html>
