@@ -1,30 +1,57 @@
-<!doctype html><html><head><meta charset="utf-8"><title>quant-arena</title>
+<!doctype html><html><head><meta charset="utf-8"><title>VQ-bench</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;color:#222}
-  h1{font-size:16px;margin:10px 14px 2px}
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 5%;margin-right:5%;color:#222;padding-bottom:46px;font-size:15px}
+  h1{font-size:17px;margin:10px 14px 2px}
+  #title .meta{font-weight:400;color:#666}
   #top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:8px 14px;border-bottom:1px solid #eee}
-  #top label{font-size:12px;color:#555}
-  #top select{font-size:13px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
-  #status{font-size:12px;color:#888}
+  #top label{font-size:13px;color:#555}
+  #top select{font-size:14px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
+  #status{font-size:13px;color:#888}
   nav#tabs{display:flex;gap:4px;padding:6px 14px 0}
-  nav#tabs button{font-size:13px;padding:5px 12px;border:1px solid #ddd;border-bottom:none;background:#f4f4f6;border-radius:6px 6px 0 0;cursor:pointer}
+  nav#tabs button{font-size:14px;padding:5px 12px;border:1px solid #ddd;border-bottom:none;background:#f4f4f6;border-radius:6px 6px 0 0;cursor:pointer}
   nav#tabs button.active{background:#fff;font-weight:600}
   #bar{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:8px 14px;border-top:1px solid #eee;border-bottom:1px solid #eee}
-  #bar label{font-size:12px;color:#555}
-  #bar select,#bar input[type=text]{font-size:13px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
+  #bar label{font-size:13px;color:#555}
+  #bar select,#bar input[type=text]{font-size:14px;padding:3px 6px;border:1px solid #ccc;border-radius:6px}
+  #bar button{font-size:14px;padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#222;cursor:pointer}
+  #bar button:hover{background:#f4f4f6}
+  #dlbtns{gap:6px}
   .ctl{display:flex;gap:5px;align-items:center}
   .chk{font-size:12px;color:#555;display:flex;gap:3px;align-items:center}
-  #fig{width:100%;height:600px}
+  #plotwrap{display:flex;gap:14px;padding:8px 14px 0;align-items:stretch}
+  #fig{flex:1 1 auto;min-width:0;height:620px}
   #fig.drag{outline:3px dashed #1f77b4;outline-offset:-6px}
-  .hint{font:12px system-ui;color:#666;padding:4px 14px 10px}
+  #legendpanel{flex:0 0 250px;height:620px;overflow-y:auto;border:1px solid #e6e6e6;
+               border-radius:8px;padding:0 8px 8px;box-sizing:border-box;background:#fff}
+  #legendhead{display:flex;align-items:center;justify-content:space-between;
+              position:sticky;top:0;background:#fff;padding:8px 2px 7px;margin-bottom:2px;
+              border-bottom:1px solid #eee;font-size:12px;font-weight:600;color:#666;
+              text-transform:uppercase;letter-spacing:0.04em}
+  #legendhead .btns{display:flex;gap:5px}
+  #legendhead button{font-size:11px;font-weight:500;padding:2px 8px;border:1px solid #ccc;
+                     border-radius:5px;background:#fff;color:#333;cursor:pointer;text-transform:none;letter-spacing:0}
+  #legendhead button:hover{background:#f4f4f6}
+  .legrow{display:flex;align-items:center;gap:8px;padding:3px 4px;border-radius:6px;cursor:pointer}
+  .legrow:hover{background:#f4f6fa}
+  .legrow input{cursor:pointer;margin:0;flex:0 0 auto}
+  .legrow svg{flex:0 0 auto}
+  .legrow .lbl{font-size:13px;color:#222;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .legrow.off .lbl{color:#b3b3b3}
+  .legrow.off svg{opacity:0.32}
+  .hint{font:12px system-ui;color:#666;padding:8px 14px 10px}
+  @media (max-width:760px){
+    #plotwrap{flex-direction:column}
+    #fig{height:440px}
+    #legendpanel{flex-basis:auto;width:100%;height:auto;max-height:220px}
+  }
   /* table tab */
   #tab-table{padding:8px 14px 18px}
-  #tq{padding:6px 10px;font-size:13px;width:240px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px}
-  table{border-collapse:collapse;font-size:13px;width:100%}
+  #tq{padding:6px 10px;font-size:14px;width:240px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:14px;width:100%}
   th,td{padding:6px 10px;text-align:right;white-space:nowrap}
   th{background:#f4f4f6;cursor:pointer;user-select:none;position:sticky;top:0;border-bottom:2px solid #ddd}
   th:hover{background:#e9e9ee}
@@ -34,12 +61,98 @@
   tr:hover td{background:#eef5ff}
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
   .fam{text-align:left;color:#444}
+  /* brand header + about banner */
+  #brand{text-align:center;font-size:30px;font-weight:700;letter-spacing:-0.01em;
+         color:#111;padding:18px 14px 2px;margin:0}
+  #tagline{text-align:center;font-size:14px;color:#777;padding:0 14px 12px;margin:0}
+  #about{padding:4px 14px 16px}
+  #sep{border:none;border-top:3px solid #ccc;margin:0 0 4px}
+  #about p{font-size:14.5px;line-height:1.55;color:#444;margin:0 0 8px}
+  #about details,#below details{margin-top:6px;font-size:14px}
+  #about summary,#below summary{cursor:pointer;color:#1f6feb;font-weight:600;font-size:13.5px;
+                 text-transform:uppercase;letter-spacing:0.04em;outline:none}
+  #about details[open] summary,#below details[open] summary{margin-bottom:8px}
+  .note{font-size:13px;color:#888;margin-top:8px}
+  /* section below the plots (References dropdown) + info tables — left-aligned text tables */
+  #below{padding:14px 14px 24px;max-width:960px}
+  #below details p{font-size:14px;color:#666;margin:0 0 12px}
+  table.info{border-collapse:collapse;font-size:14px;width:100%;margin-bottom:6px}
+  table.info th,table.info td{padding:7px 10px;text-align:left;white-space:normal;
+                              vertical-align:top;border-bottom:1px solid #eee}
+  table.info th{background:#f4f4f6;position:static;font-weight:600;color:#333;border-bottom:2px solid #ddd}
+  table.info tr:hover td{background:#f7f9fc}
+  table.info td.num{white-space:nowrap}
+  table.info .grp td{background:#fafafa;font-weight:600;color:#555;
+                     text-transform:uppercase;letter-spacing:0.03em;font-size:11.5px}
+  table.info code{font-size:12px;color:#333;background:#f2f2f4;padding:1px 4px;border-radius:4px}
+  table.info a{color:#1f6feb;text-decoration:none}
+  table.info a:hover{text-decoration:underline}
+  /* footer */
+  #foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:10px 14px;
+        border-top:1px solid #eee;background:#fff;z-index:20}
+  #foot a{font-size:16px;color:#555;text-decoration:none}
+  #foot a:hover{text-decoration:underline;color:#222}
 </style></head><body>
 <!-- Single-run data is injected into the block below by `qa dashboard`; on the
      committed site the placeholder stays put, JSON.parse fails, and we go global. -->
 <script type="application/json" id="embedded">__EMBED__</script>
 
-<h1 id="title">quant-arena</h1>
+<header id="brand">VQ-bench</header>
+<p id="tagline">a composable vector quantization framework</p>
+
+<section id="about">
+  <p><b>VQ-bench</b> is an open benchmark and harness for vector quantization algorithms. It implements several primitives in Rust and builds quantizers by composing these primitives. It supports several high-dimensional embedding datasets and measures how different quantizers trade off <i>size</i> (e.g., bits-per-dimension, encoding memory) against
+  <i>quality</i> (e.g., reconstruction error, recall). VQ-bench reports these metrics side-by-side and lets you explore the trade-offs directly. The goal is for it to eventually provide an open-source, reproducible comparison of existing quantization algorithms and a testbed for designing new quantization algorithms.
+  
+  <details>
+    <summary>Datasets</summary>
+    <table class="info">
+      <thead><tr><th>Dataset</th><th>Embedding model / dim</th><th>Vectors</th><th>Calibration queries</th></tr></thead>
+      <tbody>
+        <tr><td>ArXiv</td><td><code>nomic</code> / 768</td><td class="num">1,344,643</td><td class="num">0</td></tr>
+        <tr><td>CCNews</td><td><code>nomic</code> / 768</td><td class="num">495,328</td><td class="num">0</td></tr>
+        <tr><td>Yahoo</td><td><code>MiniLM</code> / 384</td><td class="num">677,305</td><td class="num">0</td></tr>
+        <tr><td>COCO</td><td><code>nomic</code> / 768</td><td class="num">282,360</td><td class="num">114,054</td></tr>
+        <tr><td>LAION</td><td><code>CLIP</code> / 512</td><td class="num">1,000,448</td><td class="num">999,448</td></tr>
+      </tbody>
+    </table>
+    <p class="note">All datasets are from <a href="https://arxiv.org/abs/2505.17810" target="_blank" rel="noopener">VIBE</a> (Jääsääri et al. 2025) and use dot-product similarity. <b>Calibration queries</b> is the number of available sample queries for training.
+  </details>
+  <details>
+    <summary>Experiments</summary>
+    <p style="line-height:1.55;color:#444;margin:0">Two experiments
+    are available in the selector.
+  
+    <b>benchmark</b> displays the results from running each quantizer across all datasets.
+    <b>whitening-ablation</b> is a proof-of-concept experiment that takes advantage of the compositional interface of VQ-bench. It investigates whether <em>whitening</em> (making the query distribution isotropic via SVD) improves quantization performance. It applies only to datasets with calibration queries, and leads to improvements on COCO but regressions on LAION.
+  </details>
+  <details>
+    <summary>Metrics</summary>
+    <table class="info">
+      <thead><tr><th>Metric</th><th>What it measures</th><th>Better</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="3">KV-cache values · signal compression</td></tr>
+        <tr><td><b>reconstruction MSE</b></td><td>Average squared distance between the true vector and the reconstructed vector.</td><td>lower</td></tr>
+        <tr><td><b>reconstruction bias</b></td><td>Squared norm of the average residual vector (true vector &minus; approximated vector).</td><td>lower</td></tr>
+        <tr class="grp"><td colspan="3">Model weights compression</td></tr>
+        <tr><td><b>score MSE</b></td><td>Average squared error of the inner-product estimates between queries and candidates.</td><td>lower</td></tr>
+        <tr><td><b>score bias</b></td><td>Bias of the inner-product estimates.</td><td>→ 0</td></tr>
+        <tr class="grp"><td colspan="3">Vector search · recommendations</td></tr>
+        <tr><td><b>recall@k</b></td><td>Fraction of the true top-k neighbors recovered contained in the approximated top-k.</td><td>higher</td></tr>
+        <tr><td><b>SOS<sub>k</sub> (sum of top scores)</b></td><td>Ratio of summed top-k approximated scores and summed true top-k scores.</td><td>higher</td></tr>
+        <tr class="grp"><td colspan="3">KV-cache keys · softmax model layers</td></tr>
+        <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax (i.e., attention) distributions induced by true and approximate candidate scores, at temperature τ.</td><td>lower</td></tr>
+        <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax (i.e., attention) distributions, at temperature τ.</td><td>lower</td></tr>
+      </tbody>
+    </table>
+    <p class="note">We also report size and cost metrics (bits per dimension, peak / encode memory, encode / scoring time). Softmax metrics are reported at temperatures τ ∈ {0.5, 1, 2}; recall and SOS at k ∈ {1, 10, 50}.</p>
+  </details>
+  <p style="margin-top:16px;padding-top:12px;border-top:1px solid #eee"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is maintained by Amir Ingber and Edo Liberty (<a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a>) and Ashwin Padaki (University of Pennsylvania). The code will become open source in late July 2026.</p>
+</section>
+
+<hr id="sep">
+
+<h1 id="title">vq-bench</h1>
 <div id="top">
   <div class="ctl" id="expctl"><label>experiment</label><select id="expsel"></select></div>
   <div class="ctl"><label>dataset</label><select id="dssel"></select></div>
@@ -60,19 +173,38 @@
     <div class="ctl"><label>t</label><select id="tsel"></select></div>
     <div class="ctl"><label>group</label><select id="gsel">
       <option value="family">family</option><option value="method">method</option></select></div>
-    <span class="chk"><input type="checkbox" id="leg" checked><label for="leg">legend</label></span>
     <div class="ctl"><label>filter</label><input type="text" id="q" placeholder="e.g. PQ, EDEN, B=4"></div>
-    <div class="ctl"><label>data</label><input type="file" id="file" accept=".json,application/json"></div>
+    <div class="ctl" id="dlbtns">
+      <button id="btn-png">download plot (png)</button>
+    </div>
   </div>
-  <div id="fig"></div>
-  <div class="hint">Pick axes to explore · click a legend entry to toggle, double-click to isolate ·
-    drag a box to zoom, double-click to reset · drop a JSON on the chart (or use the file picker) to load another run.</div>
+  <div id="plotwrap">
+    <div id="fig"></div>
+    <aside id="legendpanel">
+      <div id="legendhead"><span>series</span>
+        <span class="btns"><button id="leg-all">all</button><button id="leg-none">none</button></span>
+      </div>
+      <div id="leglist"></div>
+    </aside>
+  </div>
 </section>
 
 <section id="tab-table" hidden>
   <input id="tq" placeholder="filter (e.g. PQ, EDEN, B=4)…">
   <table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table>
 </section>
+
+<section id="below">
+  <details>
+    <summary>References</summary>
+    <p>Each method evaluated in VQ-bench, with a link to its source. Colors match the plot series.</p>
+    <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
+    <tbody id="refbody"></tbody></table>
+    <p class="note">Scalar and MinMax are uniform min–max baselines (per-coordinate and per-vector, respectively) with no dedicated reference.</p>
+  </details>
+</section>
+
+<footer id="foot"><a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a></footer>
 
 <script>
 // Stable color per family (family = first whitespace token of the label).
@@ -83,8 +215,6 @@ const COLORS = {
   "EDEN-biased":"#238b45", "EDEN-unbiased":"#74c476",
   // TurboQuant family — purples
   "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
-  // Hadamard-rotation family — blues
-  "Hada-LDLQ":"#08519c", "Hada-E8":"#6baed6",
   // singletons — distinct hues
   "PQ":"#000000",      // black
   "SimHash":"#008b8b", // dark teal
@@ -95,10 +225,6 @@ const COLORS = {
   "Int":"#e7298a",     // magenta-pink
   "Scalar":"#d62728",  // red
   "MinMax":"#bf9000",  // gold
-  // legacy EDEN variants kept for older result files (no collision with above)
-  "EDEN":"#2ca02c","EDEN-optT":"#3182bd","EDEN-ideal":"#98df8a",
-  "EDEN-PQ":"#a63603","EDEN-PQ-optT":"#e377c2","EDEN-PQ-ideal":"#c49c94",
-  "EDEN-PQ-ideal-optT":"#f7b6d2"
 };
 // Fallback for any future family not listed above — broadened so new methods
 // don't immediately collide.
@@ -167,11 +293,19 @@ function parseDataset(block, meta){
   return { rows, ks, temps, hasSos };
 }
 
-let DATA = null, famColor = {};
+let DATA = null, famColor = {}, curFname = "vq-bench";
+let hiddenSeries = new Set();   // series names currently toggled off
+let plotSeries = [];            // ordered {name,color,dashed,square}, aligned to plot trace order
+let panelSig = "";              // signature of the panel's series set; rebuild only when it changes
 
 function assignColors(rows){
   famColor = {}; let fb = 0;
-  for(const r of rows){ if(!(r.family in famColor)){ famColor[r.family] = COLORS[r.family] || PALETTE[fb++ % PALETTE.length]; } }
+  for(const r of rows){
+    if(!(r.family in famColor)){
+      const base = r.family.startsWith("Whitened-") ? r.family.slice(9) : null;
+      famColor[r.family] = (base ? (COLORS[base] || null) : null) ?? COLORS[r.family] ?? PALETTE[fb++ % PALETTE.length];
+    }
+  }
 }
 
 // ── Explore tab (scatter) ───────────────────────────────────────────────────────
@@ -206,6 +340,7 @@ function fillAxis(sel, fields, want){
 
 function setData(parsed){
   DATA = parsed; assignColors(DATA.rows);
+  hiddenSeries.clear(); panelSig = "";   // fresh dataset → all series shown, force panel rebuild
   const fields = availFields();
   fillAxis(document.getElementById("xsel"), fields, "bits");
   fillAxis(document.getElementById("ysel"), fields, "recall");
@@ -256,46 +391,8 @@ function axisLayout(vals, field, log, label){
   ax.range=[mn-pad,mx+pad]; return ax;
 }
 
-// Lift the live legend <g> out of the rendered plot into a tightly-cropped
-// standalone SVG — handy for placing one shared legend across subfigures.
-// Reflects exactly what's shown (colors, thick line swatches, toggled entries).
-function buildLegendSVG(gd){
-  const legend = gd.querySelector("g.legend");
-  if(!legend) return null;
-  const NS = "http://www.w3.org/2000/svg", pad = 6;
-  const bb = legend.getBBox();                 // legend-local coords (ignores the g's own transform)
-  const W = Math.ceil(bb.width)+2*pad, H = Math.ceil(bb.height)+2*pad;
-  const svg = document.createElementNS(NS,"svg");
-  svg.setAttribute("xmlns", NS);
-  svg.setAttribute("width", W); svg.setAttribute("height", H);
-  svg.setAttribute("viewBox", `${bb.x-pad} ${bb.y-pad} ${W} ${H}`);
-  const bg = document.createElementNS(NS,"rect");
-  bg.setAttribute("x",bb.x-pad); bg.setAttribute("y",bb.y-pad);
-  bg.setAttribute("width",W); bg.setAttribute("height",H); bg.setAttribute("fill","white");
-  svg.appendChild(bg);
-  const clone = legend.cloneNode(true);
-  clone.removeAttribute("transform");          // align children with our viewBox
-  clone.removeAttribute("clip-path");          // drop dangling scroll-clip refs (defs not carried over)
-  clone.querySelectorAll("[clip-path]").forEach(el=>el.removeAttribute("clip-path"));
-  clone.querySelectorAll(".scrollbar").forEach(el=>el.remove()); // drop Plotly's legend scrollbar rect
-  clone.querySelectorAll("rect.bg").forEach(el=>el.remove());    // drop Plotly's legend border/box (our white bg suffices)
-  svg.appendChild(clone);
-  return svg;
-}
-function downloadLegendSVG(gd){
-  const svg = buildLegendSVG(gd);
-  if(!svg){ alert("Turn the legend on (the “legend” checkbox) before exporting it."); return; }
-  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(svg);
-  const a = document.createElement("a");
-  a.href = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
-  a.download = "quant-arena-legend.svg"; a.click();
-}
-
 function redraw(){
   if(!DATA) return;
-  const prev = document.getElementById("fig");
-  const vis = {};
-  if(prev && prev.data) for(const t of prev.data){ if(t.visible!==undefined) vis[t.name]=t.visible; }
   const xf=document.getElementById("xsel").value, yf=document.getElementById("ysel").value;
   const k=parseInt(document.getElementById("ksel").value,10);
   const t=parseFloat(document.getElementById("tsel").value);
@@ -313,7 +410,7 @@ function redraw(){
   const ok = (x,y) => x!=null && y!=null && (!xlog||x>0) && (!ylog||y>0);
   const rows = DATA.rows.filter(r => r.method.toLowerCase().includes(filt) || r.family.toLowerCase().includes(filt));
 
-  const traces=[], xs=[], ys=[];
+  const traces=[], xs=[], ys=[], seriesMeta=[];
   const hov = `%{text}<br>${FIELDS[xf].label}=%{x:${FIELDS[xf].d3}}<br>${FIELDS[yf].label}=%{y:${FIELDS[yf].d3}}<extra></extra>`;
   if(grp==="family"){
     const fams=[], seen=new Set();
@@ -322,16 +419,24 @@ function redraw(){
       const pts = rows.filter(r=>r.family===fam).map(r=>[gx(r),gy(r),r.method]).filter(p=>ok(p[0],p[1])).sort((a,b)=>a[0]-b[0]);
       if(!pts.length) continue;
       pts.forEach(p=>{xs.push(p[0]);ys.push(p[1]);});
+      const isW = fam.startsWith("Whitened-");
       traces.push({x:pts.map(p=>p[0]),y:pts.map(p=>p[1]),text:pts.map(p=>p[2]),mode:"lines+markers",
-        name:fam,legendgroup:fam,line:{color:famColor[fam],width:4.5},
-        marker:{color:famColor[fam],size:10,line:{width:1,color:"#fff"}},hovertemplate:hov});
+        name:fam,legendgroup:fam,visible:!hiddenSeries.has(fam),
+        line:{color:famColor[fam],width:4.5,dash:isW?"dot":"solid"},
+        marker:{color:famColor[fam],size:isW?9:10,symbol:isW?"square":"circle",
+                line:{width:1,color:"#fff"}},hovertemplate:hov});
+      seriesMeta.push({name:fam,color:famColor[fam],dashed:isW,square:isW});
     }
   } else {
     for(const r of rows){
       const x=gx(r), y=gy(r); if(!ok(x,y)) continue;
       xs.push(x); ys.push(y);
+      const isW2 = r.family.startsWith("Whitened-");
       traces.push({x:[x],y:[y],text:[r.method],mode:"markers",name:r.method,legendgroup:r.family,
-        marker:{color:famColor[r.family],size:11,line:{width:1,color:"#fff"}},hovertemplate:hov});
+        visible:!hiddenSeries.has(r.method),
+        marker:{color:famColor[r.family],size:isW2?10:11,symbol:isW2?"square":"circle",
+                line:{width:1,color:"#fff"}},hovertemplate:hov});
+      seriesMeta.push({name:r.method,color:famColor[r.family],dashed:isW2,square:isW2});
     }
   }
 
@@ -339,25 +444,94 @@ function redraw(){
   if(yf==="recall") shapes.push({type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:0.9,y1:0.9,line:{color:"#bbb",dash:"dash",width:1}});
   if(xf==="recall") shapes.push({type:"line",yref:"paper",y0:0,y1:1,xref:"x",x0:0.9,x1:0.9,line:{color:"#bbb",dash:"dash",width:1}});
 
-  const showleg = document.getElementById("leg").checked; // unchecked → legend gone from view & downloads
+  // The series legend lives in the HTML panel (#legendpanel), not in Plotly — robust at
+  // any width and gives obvious per-series checkboxes. So the chart itself draws no legend.
   const layout = {
     font:{family:"'Helvetica Neue',Helvetica,Arial,sans-serif", size:21, color:"#222"},
-    hovermode:"closest", showlegend:showleg,
-    legend:{groupclick:"togglegroup", bgcolor:"rgba(255,255,255,0.92)", bordercolor:"#ccc", borderwidth:1, font:{size:20}},
-    margin:{l:116,r:showleg?240:30,t:20,b:88}, plot_bgcolor:"white", paper_bgcolor:"white",
+    hovermode:"closest", showlegend:false,
+    margin:{l:96,r:24,t:20,b:80}, plot_bgcolor:"white", paper_bgcolor:"white",
     xaxis: axisLayout(xs,xf,xlog,axisTitle(xf,k,t)), yaxis: axisLayout(ys,yf,ylog,axisTitle(yf,k,t)), shapes,
   };
-  for(const tr of traces) if(tr.name in vis) tr.visible = vis[tr.name];
-  const fname = `quant-arena-${yf}-vs-${xf}`;
+  curFname = `vq-bench-${yf}-vs-${xf}`;
   Plotly.react("fig", traces, layout, {
-    responsive:true, displaylogo:false,
-    toImageButtonOptions:{format:"svg", filename:fname},           // vector by default — paste straight into LaTeX
-    modeBarButtonsToAdd:[
-      { name:"Download PNG (3×)", icon:Plotly.Icons.camera,         // hi-res raster fallback
-        click:gd=>Plotly.downloadImage(gd,{format:"png", scale:3, filename:fname}) },
-      { name:"Download legend (SVG)", icon:Plotly.Icons.disk,       // just the legend, tightly cropped
-        click:gd=>downloadLegendSVG(gd) },
-    ],
+    responsive:true, displaylogo:false, displayModeBar:"hover",
+    modeBarButtonsToRemove:["toImage","select2d","lasso2d"],      // downloads live in the toolbar buttons
+  });
+  plotSeries = seriesMeta;
+  syncLegendPanel(seriesMeta);
+}
+
+// ── HTML legend / series-toggle panel ───────────────────────────────────────────
+function swatchSVG({color,dashed,square}){
+  const marker = square
+    ? `<rect x="9" y="3" width="8" height="8" fill="${color}" stroke="#fff" stroke-width="1.2"/>`
+    : `<circle cx="13" cy="7" r="4.3" fill="${color}" stroke="#fff" stroke-width="1.2"/>`;
+  return `<svg width="30" height="14" viewBox="0 0 30 14" aria-hidden="true">`
+       + `<line x1="1" y1="7" x2="29" y2="7" stroke="${color}" stroke-width="3"`
+       + (dashed ? ` stroke-dasharray="2.5,2.5"` : ``) + `/>` + marker + `</svg>`;
+}
+
+// Toggle one series' visibility in the live plot by name (no full redraw → keeps scroll).
+function restyleSeries(name, visible){
+  const idx = plotSeries.findIndex(s=>s.name===name);
+  if(idx>=0) Plotly.restyle("fig", {visible}, [idx]);
+}
+
+function syncLegendPanel(series){
+  const list = document.getElementById("leglist");
+  const sig = series.map(s=>s.name).join("");
+  if(sig===panelSig){                       // same series set → just refresh checked/off state
+    list.querySelectorAll(".legrow").forEach(row=>{
+      const off = hiddenSeries.has(row.dataset.name);
+      row.classList.toggle("off", off);
+      const cb = row.querySelector("input"); if(cb) cb.checked = !off;
+    });
+    return;
+  }
+  panelSig = sig;
+  list.innerHTML = "";
+  for(const s of series){
+    const off = hiddenSeries.has(s.name);
+    const row = document.createElement("div");
+    row.className = "legrow" + (off?" off":"");
+    row.dataset.name = s.name;
+    row.title = s.name + " — click to toggle, double-click to isolate";
+    row.innerHTML = `<input type="checkbox" ${off?"":"checked"}>${swatchSVG(s)}<span class="lbl">${s.name}</span>`;
+    const cb = row.querySelector("input");
+    cb.onclick = e => e.stopPropagation();   // checkbox handles itself; don't double-fire the row click
+    cb.onchange = () => setSeriesHidden(s.name, !cb.checked);
+    row.onclick = e => { if(e.target!==cb){ cb.checked=!cb.checked; setSeriesHidden(s.name, !cb.checked); } };
+    row.ondblclick = () => isolateSeries(s.name);
+    list.appendChild(row);
+  }
+}
+
+function setSeriesHidden(name, hidden){
+  if(hidden) hiddenSeries.add(name); else hiddenSeries.delete(name);
+  const row = document.querySelector(`.legrow[data-name="${CSS.escape(name)}"]`);
+  if(row){ row.classList.toggle("off", hidden); const cb=row.querySelector("input"); if(cb) cb.checked=!hidden; }
+  restyleSeries(name, !hidden);
+}
+
+// Show only `name` (hide the rest); if already isolated to it, restore all.
+function isolateSeries(name){
+  const others = plotSeries.filter(s=>s.name!==name);
+  const alreadySolo = !hiddenSeries.has(name) && others.every(s=>hiddenSeries.has(s.name));
+  hiddenSeries = new Set(alreadySolo ? [] : others.map(s=>s.name));
+  applyAllVisibility();
+}
+function setAllHidden(hidden){
+  hiddenSeries = new Set(hidden ? plotSeries.map(s=>s.name) : []);
+  applyAllVisibility();
+}
+// Push the full hiddenSeries state to both the plot (one restyle) and the panel rows.
+function applyAllVisibility(){
+  if(plotSeries.length)
+    Plotly.restyle("fig", {visible: plotSeries.map(s=>!hiddenSeries.has(s.name))}, plotSeries.map((_,i)=>i));
+  document.querySelectorAll("#leglist .legrow").forEach(row=>{
+    const off = hiddenSeries.has(row.dataset.name);
+    row.classList.toggle("off", off);
+    const cb = row.querySelector("input"); if(cb) cb.checked = !off;
   });
 }
 
@@ -390,7 +564,6 @@ function buildTableCols(){
   if(any(r=>r.model_bits!=null)) cols.push({key:"model_bits", label:"model b/d", kind:"num3", get:r=>r.model_bits});
   if(any(r=>r.code_bits!=null))  cols.push({key:"code_bits",  label:"code b/d",  kind:"num3", get:r=>r.code_bits});
   for(const [key,label,kind,get] of TABLE_METRICS) if(any(get)) cols.push({key,label,kind,get});
-  for(const t of DATA.temps) if(any(r=>r.exp[t]!=null)) cols.push({key:`exp@${t}`,label:`exp-MSE@${tg(t)}`,kind:"sci",get:r=>r.exp[t]});
   for(const t of DATA.temps) if(any(r=>r.kl[t]!=null))  cols.push({key:`kl@${t}`, label:`attn KL (τ=${tg(t)})`, kind:"sci",get:r=>r.kl[t]});
   for(const t of DATA.temps) if(any(r=>r.l1[t]!=null))  cols.push({key:`l1@${t}`, label:`attn TV (τ=${tg(t)})`, kind:"num3",get:r=>r.l1[t]/2});
   for(const k of DATA.ks) cols.push({key:`r${k}`, label:`R@${k}`, kind:"recall", get:r=>r.recalls[k]});
@@ -453,15 +626,32 @@ function buildTable(){ TCOLS = buildTableCols(); tableHeader(); tableRender(); }
 // ── render: an experiment, one dataset at a time ────────────────────────────────
 let CURRENT_EXP = null;
 
+// Pretty header: "ArXiv · 1,344,643 vectors · 768 dimensions". Name is the
+// dataset id (first hyphen token) prettified; dim falls back to the digits in
+// the dataset name. Returns {html, text} — html has the name bold and the
+// counts muted; text is a tag-free version for document.title.
+const DS_NAMES = {arxiv:"ArXiv", ccnews:"CCNews", yahoo:"Yahoo", coco:"COCO", laion:"LAION"};
+function datasetHeader(block){
+  const id = String(block.dataset || "").split("-")[0];
+  const name = DS_NAMES[id] || (id ? id[0].toUpperCase()+id.slice(1) : block.dataset);
+  const dim = block.dim ?? (String(block.dataset||"").match(/-(\d+)-/)||[])[1];
+  const meta = [];
+  if(block.db_size != null) meta.push(`${Number(block.db_size).toLocaleString()} vectors`);
+  if(dim != null) meta.push(`${dim} dimensions`);
+  const metaText = meta.join(" · ");
+  const html = `<strong>${name}</strong>` + (metaText ? ` <span class="meta">· ${metaText}</span>` : "");
+  const text = metaText ? `${name} · ${metaText}` : name;
+  return { html, text };
+}
+
 function renderDataset(idx){
   const exp = CURRENT_EXP; if(!exp || !exp.datasets || !exp.datasets[idx]) return;
   const block = exp.datasets[idx];
   setData(parseDataset(block, exp.meta || {}));
   buildTable();
-  const h = [(exp.meta||{}).name, block.dataset, block.sim, block.db_size]
-    .filter(x=>x!=null && x!=="").join(" · ");
-  document.getElementById("title").textContent = h;
-  document.title = "quant-arena · " + h;
+  const h = datasetHeader(block);
+  document.getElementById("title").innerHTML = h.html;
+  document.title = "VQ-bench · " + h.text;
 }
 
 function loadExperiment(exp){
@@ -477,10 +667,51 @@ function loadExperiment(exp){
 }
 
 // ── tabs ────────────────────────────────────────────────────────────────────────
+// ── References tab (static) ──────────────────────────────────────────────────────
+// Colors match the plot series: COLORS[name] where defined, else the same
+// PALETTE color assignColors() hands out in benchmark.json family order.
+const REFS = [
+  {n:"RaBitQ",          c:"#e6550d", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for ANN", u:"https://doi.org/10.1145/3654970"},
+  {n:"E-RaBitQ",        c:"#fdae6b", y:2025, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors (Extended RaBitQ)", u:"https://arxiv.org/abs/2409.09913"},
+  {n:"PQ",              c:"#000000", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
+  {n:"OPQ",             c:"#393b79", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
+  {n:"SimHash",         c:"#008b8b", y:2002, t:"Similarity Estimation Techniques from Rounding Algorithms", u:"https://doi.org/10.1145/509907.509965"},
+  {n:"ITQ",             c:"#637939", y:2013, t:"Iterative Quantization: A Procrustean Approach to Learning Binary Codes", u:"https://doi.org/10.1109/TPAMI.2012.193"},
+  {n:"ITQ-asym",        c:"#8c6d31", y:2014, t:"Asymmetric Distances for Binary Embeddings", u:"https://doi.org/10.1109/TPAMI.2013.101"},
+  {n:"QJL",             c:"#bcbd22", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
+  {n:"EDEN-biased",     c:"#238b45", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"EDEN-unbiased",   c:"#74c476", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"TurboQuant-MSE",  c:"#6a51a3", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
+  {n:"TurboQuant-prod", c:"#9e9ac8", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
+  {n:"QuIP",            c:"#843c39", y:2023, t:"QuIP: 2-Bit Quantization of Large Language Models With Guarantees", u:"https://proceedings.neurips.cc/paper_files/paper/2023/file/0df38cd13520747e1e64e5b123a78ef8-Paper-Conference.pdf"},
+  {n:"QuIP#",           c:"#7b4173", y:2024, t:"QuIP#: Even Better LLM Quantization with Hadamard Incoherence and Lattice Codebooks", u:"https://arxiv.org/abs/2402.04396"},
+  {n:"GPTQ",            c:"#5254a3", y:2023, t:"OPTQ (GPTQ): Accurate Quantization for Generative Pre-trained Transformers", u:"https://openreview.net/forum?id=tcbBPnfwxS"},
+  {n:"QuaRot",          c:"#8ca252", y:2024, t:"QuaRot: Outlier-Free 4-bit Inference in Rotated LLMs", u:"https://arxiv.org/abs/2404.00456"},
+  {n:"NF4",             c:"#8c564b", y:2023, t:"QLoRA: Efficient Finetuning of Quantized LLMs (NF4 data type)", u:"https://arxiv.org/abs/2305.14314"},
+  {n:"KIVI",            c:"#fb9a99", y:2024, t:"KIVI: A Tuning-Free Asymmetric 2-bit Quantization for KV Cache", u:"https://arxiv.org/abs/2402.02750"},
+  {n:"GEAR",            c:"#7f7f7f", y:2024, t:"GEAR: An Efficient KV Cache Compression Recipe for Near-Lossless Generative Inference", u:"https://arxiv.org/abs/2403.05527"},
+  {n:"Int",             c:"#e7298a", y:2018, t:"Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference", u:"https://doi.org/10.1109/CVPR.2018.00286"},
+  {n:"Scalar",          c:"#d62728", y:null, t:"Uniform per-coordinate min–max baseline", u:null},
+  {n:"MinMax",          c:"#bf9000", y:null, t:"Uniform per-vector min–max baseline", u:null},
+];
+(function renderRefs(){
+  const tb = document.getElementById("refbody");
+  if(!tb) return;
+  // year ascending; un-cited baselines (year null) sink to the bottom.
+  const rows = REFS.slice().sort((a,b)=>(a.y ?? 1e9) - (b.y ?? 1e9));
+  tb.innerHTML = rows.map(r => {
+    const dot = `<span class="dot" style="background:${r.c}"></span>`;
+    const paper = r.u
+      ? `<a href="${r.u}" target="_blank" rel="noopener">${r.t}</a>`
+      : r.t;
+    return `<tr><td>${dot}${r.n}</td><td>${paper}</td><td class="num">${r.y ?? "—"}</td></tr>`;
+  }).join("");
+})();
+
+const TABS = ["explore","table"];
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x===b));
-  document.getElementById("tab-explore").hidden = b.dataset.tab !== "explore";
-  document.getElementById("tab-table").hidden   = b.dataset.tab !== "table";
+  for(const t of TABS) document.getElementById("tab-"+t).hidden = b.dataset.tab !== t;
   if(b.dataset.tab==="explore" && DATA) Plotly.Plots.resize("fig"); // Plotly mis-sizes if drawn while hidden
 });
 
@@ -488,16 +719,57 @@ document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
 const xsel=document.getElementById("xsel"), ysel=document.getElementById("ysel");
 xsel.onchange=()=>{ document.getElementById("xlog").checked=FIELDS[xsel.value].log; redraw(); };
 ysel.onchange=()=>{ document.getElementById("ylog").checked=FIELDS[ysel.value].log; redraw(); };
-for(const id of ["xlog","ylog","ksel","tsel","gsel","leg"]) document.getElementById(id).addEventListener("change", redraw);
+for(const id of ["xlog","ylog","ksel","tsel"]) document.getElementById(id).addEventListener("change", redraw);
+// group switches the series namespace (families ↔ methods) → reset hidden state first.
+document.getElementById("gsel").addEventListener("change", ()=>{ hiddenSeries.clear(); panelSig=""; redraw(); });
 document.getElementById("q").addEventListener("input", redraw);
 document.getElementById("tq").addEventListener("input", tableRender);
+document.getElementById("leg-all").onclick  = ()=> setAllHidden(false);
+document.getElementById("leg-none").onclick = ()=> setAllHidden(true);
 
 function loadFile(file){
   const reader = new FileReader();
   reader.onload = e => loadExperiment(JSON.parse(e.target.result));
   reader.readAsText(file);
 }
-document.getElementById("file").addEventListener("change", e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); });
+// The exported image needs a native legend (the on-screen plot has none — it uses the
+// HTML panel instead). To avoid the visible plot flashing/resizing, we render the export
+// in an off-screen clone and never touch the live #fig graph.
+// The export is sized so the *entire* legend fits in one column without clipping —
+// a tall list just yields a taller image.
+async function downloadPlot(){
+  const gd = document.getElementById("fig");
+  const visN = plotSeries.filter(s=>!hiddenSeries.has(s.name)).length;
+  // Size the export so the full single-column legend fits: it sits inside the plot area
+  // (height − top − bottom margin), and each row is ~31px at font 14. Render tall, then
+  // confirm against the real legend bbox and grow if needed (robust to font metrics).
+  const TOP=20, BOT=80, ENTRY=32;
+  const w = Math.max(900, Math.round(gd.clientWidth || 1000));
+  let h = Math.max(620, visN*ENTRY + 80 + TOP + BOT);
+
+  // Off-screen clone: keeps the live plot untouched (no snap), but stays in the DOM so the
+  // legend's real bbox is measurable. Clone the current data/layout, then add the legend.
+  const tmp = document.createElement("div");
+  tmp.style.cssText = `position:fixed;left:-10000px;top:0;width:${w}px;height:${h}px`;
+  document.body.appendChild(tmp);
+  try {
+    const data = JSON.parse(JSON.stringify(gd.data));
+    const layout = JSON.parse(JSON.stringify(gd.layout));
+    layout.showlegend = true;
+    layout.width = w; layout.height = h;
+    layout.margin = Object.assign({}, layout.margin, {r:260});
+    layout.legend = {font:{size:14}, bgcolor:"rgba(255,255,255,0.95)", bordercolor:"#ccc",
+                     borderwidth:1, x:1.01, xanchor:"left", y:1, yanchor:"top"};
+    await Plotly.newPlot(tmp, data, layout, {staticPlot:true});
+    const lg = tmp.querySelector("g.legend");
+    const legH = lg ? lg.getBBox().height : 0;
+    const fit = Math.max(620, Math.ceil(legH) + TOP + BOT + 24);  // plot area clears the full legend
+    if(fit !== h){ h = fit; tmp.style.height = `${h}px`; await Plotly.relayout(tmp, {height:h}); }
+    await Plotly.downloadImage(tmp, {format:"png", width:w, height:h, scale:2, filename:curFname});
+  }
+  finally { Plotly.purge(tmp); tmp.remove(); }
+}
+document.getElementById("btn-png").onclick = ()=> downloadPlot();
 const fig = document.getElementById("fig");
 fig.addEventListener("dragover", e=>{ e.preventDefault(); fig.classList.add("drag"); });
 fig.addEventListener("dragleave", ()=> fig.classList.remove("drag"));

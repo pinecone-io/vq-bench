@@ -1,41 +1,54 @@
 {
-  "generated": 1781265361,
+  "generated": 1781873333,
   "runs": [
     {
-      "name": "vibe-ccnews",
-      "path": "vibe-ccnews.json",
+      "name": "benchmark",
+      "path": "benchmark.json",
       "datasets": [
+        {
+          "dataset": "arxiv-nomic-768-normalized",
+          "sim": "dot",
+          "db_size": 1344643
+        },
+        {
+          "dataset": "coco-nomic-768-normalized",
+          "sim": "dot",
+          "db_size": 282360
+        },
         {
           "dataset": "ccnews-nomic-768-normalized",
           "sim": "dot",
           "db_size": 495328
-        }
-      ],
-      "timestamp": 1781235865
-    },
-    {
-      "name": "vibe-imagenet",
-      "path": "vibe-imagenet.json",
-      "datasets": [
-        {
-          "dataset": "imagenet-clip-512-normalized",
-          "sim": "dot",
-          "db_size": 1281167
-        }
-      ],
-      "timestamp": 1781235924
-    },
-    {
-      "name": "vibe-yahoo",
-      "path": "vibe-yahoo.json",
-      "datasets": [
+        },
         {
           "dataset": "yahoo-minilm-384-normalized",
           "sim": "dot",
           "db_size": 677305
+        },
+        {
+          "dataset": "laion-clip-512-normalized",
+          "sim": "dot",
+          "db_size": 1000448
         }
       ],
-      "timestamp": 1781235924
+      "timestamp": 1781825093
+    },
+    {
+      "name": "whitening-ablation",
+      "path": "whitening-ablation.json",
+      "datasets": [
+        {
+          "dataset": "coco-nomic-768-normalized",
+          "sim": "dot",
+          "db_size": 282360
+        },
+        {
+          "dataset": "laion-clip-512-normalized",
+          "sim": "dot",
+          "db_size": 1000448
+        }
+      ],
+      "timestamp": 1781825093
     }
   ]
 }
