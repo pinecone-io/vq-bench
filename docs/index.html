@@ -105,6 +105,13 @@
   <i>quality</i> (e.g., reconstruction error, recall). VQ-bench reports these metrics side-by-side and lets you explore the trade-offs directly. The goal is for it to eventually provide an open-source, reproducible comparison of existing quantization algorithms and a testbed for designing new quantization algorithms.
   
   <details>
+    <summary>Quantizers</summary>
+    <p>Each method evaluated in VQ-bench, with a link to its source. Colors match the plot series.</p>
+    <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
+    <tbody id="refbody"></tbody></table>
+    <p class="note">Scalar and MinMax are uniform min–max baselines (per-coordinate and per-vector, respectively) with no dedicated reference.</p>
+  </details>
+  <details>
     <summary>Datasets</summary>
     <table class="info">
       <thead><tr><th>Dataset</th><th>Embedding model / dim</th><th>Vectors</th><th>Calibration queries</th></tr></thead>
@@ -192,16 +199,6 @@
 <section id="tab-table" hidden>
   <input id="tq" placeholder="filter (e.g. PQ, EDEN, B=4)…">
   <table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table>
-</section>
-
-<section id="below">
-  <details>
-    <summary>References</summary>
-    <p>Each method evaluated in VQ-bench, with a link to its source. Colors match the plot series.</p>
-    <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
-    <tbody id="refbody"></tbody></table>
-    <p class="note">Scalar and MinMax are uniform min–max baselines (per-coordinate and per-vector, respectively) with no dedicated reference.</p>
-  </details>
 </section>
 
 <footer id="foot"><a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a></footer>
