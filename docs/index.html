@@ -182,6 +182,7 @@
       <option value="family">family</option><option value="method">method</option></select></div>
     <div class="ctl"><label>filter</label><input type="text" id="q" placeholder="e.g. PQ, EDEN, B=4"></div>
     <div class="ctl" id="dlbtns">
+      <button id="btn-link">copy link</button>
       <button id="btn-png">download plot (png)</button>
     </div>
   </div>
@@ -295,6 +296,50 @@ let hiddenSeries = new Set();   // series names currently toggled off
 let plotSeries = [];            // ordered {name,color,dashed,square}, aligned to plot trace order
 let panelSig = "";              // signature of the panel's series set; rebuild only when it changes
 
+// ── shareable URL state ─────────────────────────────────────────────────────────
+// The query string encodes the current view (experiment, dataset, axes + log
+// scales, k/τ, grouping, filter, tab) so a copied URL reproduces the exact plot.
+const URL_KEYS = ["exp","ds","tab","x","y","xlog","ylog","k","t","g","q"];
+function parseURL(){
+  const p = new URLSearchParams(location.search), s = {};
+  for(const key of URL_KEYS) if(p.has(key)) s[key] = p.get(key);
+  return s;
+}
+// Default view when the page is opened with no query string.
+const DEFAULT_VIEW = {exp:"benchmark", ds:"arxiv-nomic-768-normalized", x:"bits", y:"sos", k:"10"};
+let pendingURL = parseURL();   // consumed once during the initial load, then cleared
+if(Object.keys(pendingURL).length === 0) pendingURL = {...DEFAULT_VIEW};
+let urlReady = false;          // once true, control changes are written back to the URL
+let curExpName = null, curDsId = null, currentTab = "explore";
+
+function setSelIfValid(sel, val){
+  if(val!=null && [...sel.options].some(o=>o.value===val)){ sel.value = val; return true; }
+  return false;
+}
+
+// Write the current view to the address bar (no reload). Only keys that differ
+// from their natural default are emitted, keeping shared links short.
+function writeURL(){
+  if(!urlReady) return;
+  const p = new URLSearchParams();
+  if(curExpName) p.set("exp", curExpName);
+  if(curDsId)    p.set("ds", curDsId);
+  if(currentTab!=="explore") p.set("tab", currentTab);
+  const x=document.getElementById("xsel").value, y=document.getElementById("ysel").value;
+  if(x) p.set("x", x);
+  if(y) p.set("y", y);
+  if(FIELDS[x]){ const c=document.getElementById("xlog").checked; if(c!==FIELDS[x].log) p.set("xlog", c?"1":"0"); }
+  if(FIELDS[y]){ const c=document.getElementById("ylog").checked; if(c!==FIELDS[y].log) p.set("ylog", c?"1":"0"); }
+  if(FIELDS[x] && FIELDS[y]){
+    if(FIELDS[x].perK||FIELDS[y].perK) p.set("k", document.getElementById("ksel").value);
+    if(FIELDS[x].perT||FIELDS[y].perT) p.set("t", document.getElementById("tsel").value);
+  }
+  const g=document.getElementById("gsel").value; if(g && g!=="family") p.set("g", g);
+  const q=document.getElementById("q").value; if(q) p.set("q", q);
+  const qs = p.toString();
+  history.replaceState(null, "", qs ? "?"+qs : location.pathname);
+}
+
 function assignColors(rows){
   famColor = {}; let fb = 0;
   for(const r of rows){
@@ -349,8 +394,22 @@ function setData(parsed){
   tsel.innerHTML = "";
   for(const t of DATA.temps){ const o=document.createElement("option"); o.value=t; o.textContent=t; tsel.appendChild(o); }
   tsel.value = DATA.temps.includes(+keepT) ? keepT : (DATA.temps.includes(1) ? 1 : (DATA.temps[0] ?? ""));
+  // URL overrides, applied once on the initial load (later dataset/experiment
+  // switches fall back to defaults). Log scales follow the chosen field, then
+  // an explicit xlog/ylog in the URL can override.
+  const u = pendingURL;
+  setSelIfValid(document.getElementById("xsel"), u.x);
+  setSelIfValid(document.getElementById("ysel"), u.y);
+  setSelIfValid(document.getElementById("ksel"), u.k);
+  setSelIfValid(document.getElementById("tsel"), u.t);
+  if(u.g==="family"||u.g==="method") document.getElementById("gsel").value = u.g;
+  if(u.q!=null) document.getElementById("q").value = u.q;
   document.getElementById("xlog").checked = FIELDS[document.getElementById("xsel").value].log;
   document.getElementById("ylog").checked = FIELDS[document.getElementById("ysel").value].log;
+  if(u.xlog!=null) document.getElementById("xlog").checked = u.xlog==="1";
+  if(u.ylog!=null) document.getElementById("ylog").checked = u.ylog==="1";
+  pendingURL = {};      // consumed
+  urlReady = true;
   redraw();
 }
 
@@ -456,6 +515,7 @@ function redraw(){
   });
   plotSeries = seriesMeta;
   syncLegendPanel(seriesMeta);
+  writeURL();
 }
 
 // ── HTML legend / series-toggle panel ───────────────────────────────────────────
@@ -644,6 +704,7 @@ function datasetHeader(block){
 function renderDataset(idx){
   const exp = CURRENT_EXP; if(!exp || !exp.datasets || !exp.datasets[idx]) return;
   const block = exp.datasets[idx];
+  curDsId = String(block.dataset);
   setData(parseDataset(block, exp.meta || {}));
   buildTable();
   const h = datasetHeader(block);
@@ -660,7 +721,12 @@ function loadExperiment(exp){
     o.textContent=`${d.dataset} · ${d.sim} · ${d.db_size}`; dssel.appendChild(o);
   });
   dssel.onchange = ()=> renderDataset(+dssel.value);
-  if((exp.datasets||[]).length) renderDataset(0);
+  if((exp.datasets||[]).length){
+    let dsIdx = 0;
+    if(pendingURL.ds){ const j=(exp.datasets||[]).findIndex(d=>String(d.dataset)===pendingURL.ds); if(j>=0) dsIdx=j; }
+    dssel.value = dsIdx;
+    renderDataset(dsIdx);
+  }
 }
 
 // ── tabs ────────────────────────────────────────────────────────────────────────
@@ -706,11 +772,14 @@ const REFS = [
 })();
 
 const TABS = ["explore","table"];
-document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x===b));
-  for(const t of TABS) document.getElementById("tab-"+t).hidden = b.dataset.tab !== t;
-  if(b.dataset.tab==="explore" && DATA) Plotly.Plots.resize("fig"); // Plotly mis-sizes if drawn while hidden
-});
+function selectTab(name){
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x.dataset.tab===name));
+  for(const t of TABS) document.getElementById("tab-"+t).hidden = t !== name;
+  currentTab = name;
+  if(name==="explore" && DATA) Plotly.Plots.resize("fig"); // Plotly mis-sizes if drawn while hidden
+  writeURL();
+}
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => selectTab(b.dataset.tab));
 
 // ── explore-tab control wiring ──────────────────────────────────────────────────
 const xsel=document.getElementById("xsel"), ysel=document.getElementById("ysel");
@@ -767,6 +836,13 @@ async function downloadPlot(){
   finally { Plotly.purge(tmp); tmp.remove(); }
 }
 document.getElementById("btn-png").onclick = ()=> downloadPlot();
+document.getElementById("btn-link").onclick = async ()=>{
+  writeURL();
+  const btn = document.getElementById("btn-link"), orig = btn.textContent;
+  try { await navigator.clipboard.writeText(location.href); btn.textContent = "copied ✓"; }
+  catch { btn.textContent = "copy failed"; }
+  setTimeout(()=>{ btn.textContent = orig; }, 1400);
+};
 const fig = document.getElementById("fig");
 fig.addEventListener("dragover", e=>{ e.preventDefault(); fig.classList.add("drag"); });
 fig.addEventListener("dragleave", ()=> fig.classList.remove("drag"));
@@ -785,16 +861,21 @@ async function enterGlobal(){
   runs.forEach((r,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=r.name; sel.appendChild(o); });
   async function load(i){
     const r = runs[i];
+    curExpName = r.name;
     status(`loading ${r.path} …`);
     try { const exp = await (await fetch("results/"+r.path)).json(); loadExperiment(exp); status(`${runs.length} experiment(s) · ${(r.datasets||[]).length} dataset(s)`); }
     catch { status(`failed to load results/${r.path}`); }
   }
   sel.onchange = ()=> load(+sel.value);
-  load(0);
+  let startIdx = 0;
+  if(pendingURL.exp){ const j = runs.findIndex(r=>r.name===pendingURL.exp); if(j>=0) startIdx=j; }
+  sel.value = startIdx;
+  load(startIdx);
 }
 
 // ── bootstrap: embedded single experiment, or global manifest ───────────────────
 (function(){
+  if(pendingURL.tab && TABS.includes(pendingURL.tab)) selectTab(pendingURL.tab);
   const raw = document.getElementById("embedded").textContent.trim();
   let embedded = null;
   try { embedded = raw ? JSON.parse(raw) : null; } catch { embedded = null; }
