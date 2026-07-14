@@ -1,0 +1,11 @@
+{
+  "datasets": ["arxiv-nomic-768-normalized"],
+  "seed": 1,
+  "n_reconstruct": 1000,
+  "n_eval": 1000,
+  "k": [1, 10, 50],
+  "methods": [
+    { "name": "minmax", "b": [2, 4, 8] }
+  ],
+  "metrics": ["recall", "mse_score", "mse_recon"]
+}

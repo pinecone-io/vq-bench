@@ -1,0 +1,26 @@
+[package]
+name = "vqb"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "vq-bench: a vector-quantization benchmark harness."
+
+[[bin]]
+name = "vqb"
+path = "src/bin/vqb/main.rs"
+
+[dependencies]
+faer = "0.24.1"
+ndarray = "0.16"
+rayon = "1"
+rand = "0.10.1"
+rand_chacha = "0.10.0"
+rand_distr = "0.6.0"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hdf5 = { package = "hdf5-metno", version = "0.12", optional = true }
+
+[features]
+default = ["hdf5"]
