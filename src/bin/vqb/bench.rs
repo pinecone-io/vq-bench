@@ -4,6 +4,10 @@
 
 use std::collections::BTreeMap;
 
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
+
 /// Effective bits per dimension: `(model + code bytes)·8 / (n·d)`.
 pub fn bits_per_dim(bytes: usize, n: usize, dim: usize) -> f64 {
     let cells = n * dim;
@@ -14,9 +18,12 @@ pub fn bits_per_dim(bytes: usize, n: usize, dim: usize) -> f64 {
     }
 }
 
-/// Pool positions ordered by descending score (ties by lower index).
-fn ranks_desc(scores: &[f32]) -> Vec<usize> {
+/// Pool positions ordered by descending score, ties in random order. Without randomization, 
+/// the pool is laid out in true-score order, so tiebreaking would reveal true ranking for free.
+fn ranks_desc(scores: &[f32], rng: &mut ChaCha8Rng) -> Vec<usize> {
     let mut idx: Vec<usize> = (0..scores.len()).collect();
+    idx.shuffle(rng);
+    // The sort is stable, so ties keep the shuffled order.
     idx.sort_by(|&a, &b| {
         scores[b]
             .partial_cmp(&scores[a])
@@ -25,18 +32,28 @@ fn ranks_desc(scores: &[f32]) -> Vec<usize> {
     idx
 }
 
+/// Tiebreak rng for query `qi`: a distinct ChaCha stream per query keeps a
+/// query's ranking identical however many `k`s or metrics are computed together.
+fn query_rng(seed: u64, qi: usize) -> ChaCha8Rng {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    rng.set_stream(qi as u64);
+    rng
+}
+
 /// recall@k: overlap of the approx top-k with the true top-k, averaged over queries.
 pub fn recalls(
     true_scores: &[Vec<f32>],
     approx_scores: &[Vec<f32>],
     ks: &[usize],
+    seed: u64,
 ) -> BTreeMap<usize, f64> {
     let mut out = BTreeMap::new();
     for &k in ks {
         let (mut hits, mut denom) = (0usize, 0usize);
-        for (ts, as_) in true_scores.iter().zip(approx_scores) {
-            let tr = ranks_desc(ts);
-            let ar = ranks_desc(as_);
+        for (qi, (ts, as_)) in true_scores.iter().zip(approx_scores).enumerate() {
+            let mut rng = query_rng(seed, qi);
+            let tr = ranks_desc(ts, &mut rng);
+            let ar = ranks_desc(as_, &mut rng);
             let kk = k.min(tr.len());
             let want: std::collections::HashSet<usize> = tr[..kk].iter().copied().collect();
             hits += ar[..k.min(ar.len())]
@@ -55,13 +72,15 @@ pub fn sos(
     true_scores: &[Vec<f32>],
     approx_scores: &[Vec<f32>],
     ks: &[usize],
+    seed: u64,
 ) -> BTreeMap<usize, f64> {
     let mut out = BTreeMap::new();
     for &k in ks {
         let (mut numer, mut denom) = (0.0f64, 0.0f64);
-        for (ts, as_) in true_scores.iter().zip(approx_scores) {
-            let tr = ranks_desc(ts);
-            let ar = ranks_desc(as_);
+        for (qi, (ts, as_)) in true_scores.iter().zip(approx_scores).enumerate() {
+            let mut rng = query_rng(seed, qi);
+            let tr = ranks_desc(ts, &mut rng);
+            let ar = ranks_desc(as_, &mut rng);
             numer += ar[..k.min(ar.len())]
                 .iter()
                 .map(|&p| ts[p] as f64)
@@ -197,10 +216,10 @@ mod tests {
     #[test]
     fn perfect_scores_give_full_recall_and_sos() {
         let truth = vec![vec![3.0, 2.0, 1.0], vec![1.0, 5.0, 2.0]];
-        let recalls = recalls(&truth, &truth, &[1, 2, 3]);
+        let recalls = recalls(&truth, &truth, &[1, 2, 3], 1);
         assert_eq!(recalls[&1], 1.0);
         assert_eq!(recalls[&3], 1.0);
-        let sos = sos(&truth, &truth, &[1, 2]);
+        let sos = sos(&truth, &truth, &[1, 2], 1);
         assert!((sos[&1] - 1.0).abs() < 1e-12);
         assert!((sos[&2] - 1.0).abs() < 1e-12);
     }
@@ -210,9 +229,23 @@ mod tests {
         // true top-1 is pos 0 (score 3); approx top-1 is pos 2 → miss at k=1, hit at k=2.
         let truth = vec![vec![3.0, 2.0, 1.0]];
         let approx = vec![vec![0.0, 1.0, 2.0]];
-        let r = recalls(&truth, &approx, &[1, 2]);
+        let r = recalls(&truth, &approx, &[1, 2], 1);
         assert_eq!(r[&1], 0.0);
         assert_eq!(r[&2], 0.5); // {pos2} ∩ {pos0,pos1} = ∅? top2 approx={2,1}, true={0,1} → {1}; 1/2
+    }
+
+    #[test]
+    fn constant_scores_dont_leak_true_ranking() {
+        // Pool in true-score order (as the harness lays it out), constant approx
+        // scores: recall must sit near chance (k/L), not 1.0, and be seed-stable.
+        let l = 100;
+        let truth = vec![(0..l).map(|i| (l - i) as f32).collect::<Vec<f32>>(); 50];
+        let approx = vec![vec![0.0f32; l]; 50];
+        let r = recalls(&truth, &approx, &[10], 1);
+        assert!(r[&10] < 0.5, "tie order leaked ground truth: {}", r[&10]);
+        assert_eq!(r, recalls(&truth, &approx, &[10], 1));
+        let s = sos(&truth, &approx, &[10], 1);
+        assert!(s[&10] < 0.9, "sos leaked ground truth: {}", s[&10]);
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub fn method_result(
     metrics: &[String],
     ks: &[usize],
     temps: &[f64],
+    seed: u64,
 ) -> MethodResult {
     let (score_mse, score_bias) = bench::score_mse_bias(&d.true_scores, &m.approx_scores);
     let (kl, tv) = bench::softmax_kl_tv(&d.true_scores, &m.approx_scores, temps);
@@ -68,8 +69,9 @@ pub fn method_result(
             .filter(|_| want(metrics, "bias_recon"))
             .map(|r| sig6(bench::recon_bias(&d.references, r))),
         recalls: want(metrics, "recall")
-            .then(|| sig6_k(bench::recalls(&d.true_scores, &m.approx_scores, ks))),
-        sos: want(metrics, "sos").then(|| sig6_k(bench::sos(&d.true_scores, &m.approx_scores, ks))),
+            .then(|| sig6_k(bench::recalls(&d.true_scores, &m.approx_scores, ks, seed))),
+        sos: want(metrics, "sos")
+            .then(|| sig6_k(bench::sos(&d.true_scores, &m.approx_scores, ks, seed))),
         score_kl: want(metrics, "kl").then_some(sig6_s(kl)),
         score_tv: want(metrics, "tv").then_some(sig6_s(tv)),
     }
@@ -81,6 +83,7 @@ pub fn dataset_result(
     metrics: &[String],
     ks: &[usize],
     temps: &[f64],
+    seed: u64,
 ) -> DatasetResult {
     DatasetResult {
         dataset: d.dataset.clone(),
@@ -91,7 +94,7 @@ pub fn dataset_result(
         methods: d
             .methods
             .iter()
-            .map(|m| method_result(d, m, metrics, ks, temps))
+            .map(|m| method_result(d, m, metrics, ks, temps, seed))
             .collect(),
     }
 }
@@ -115,7 +118,7 @@ pub fn run(data: &RawData, metrics: &[String]) -> Run {
         datasets: data
             .datasets
             .iter()
-            .map(|d| dataset_result(d, metrics, &m.ks, &m.temperatures))
+            .map(|d| dataset_result(d, metrics, &m.ks, &m.temperatures, m.seed))
             .collect(),
     }
 }

@@ -240,6 +240,7 @@ fn row_tail(
     references: &[Vec<f32>],
     metrics: &[String],
     dk: usize,
+    seed: u64,
 ) -> String {
     let want = |n: &str| metrics.iter().any(|m| m == n);
     let dash = || "—".to_string();
@@ -247,7 +248,7 @@ fn row_tail(
     let sci = |x: f64| format!("{x:.2e}");
 
     let recall = if want("recall") {
-        fixed(bench::recalls(true_scores, &rm.approx_scores, &[dk])[&dk])
+        fixed(bench::recalls(true_scores, &rm.approx_scores, &[dk], seed)[&dk])
     } else {
         dash()
     };
@@ -519,7 +520,14 @@ fn run_dataset<W: std::io::Write>(
         };
         eprintln!(
             "{}",
-            row_tail(&rm, &head.true_scores, &head.references, &cfg.metrics, dk)
+            row_tail(
+                &rm,
+                &head.true_scores,
+                &head.references,
+                &cfg.metrics,
+                dk,
+                cfg.seed,
+            )
         );
         // Tell the user this method skipped fit+encode by reusing a code file.
         if let Some(t) = reused_threads {
@@ -537,6 +545,7 @@ fn run_dataset<W: std::io::Write>(
             &cfg.metrics,
             &cfg.ks,
             &cfg.temperatures,
+            cfg.seed,
         ));
     }
 
