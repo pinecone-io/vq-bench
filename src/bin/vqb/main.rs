@@ -220,12 +220,19 @@ fn run(path: &std::path::Path, dry_run: bool, fresh: bool) -> Result<()> {
         println!("k: {:?}", cfg.ks);
         println!("temp: {:?}", cfg.temperatures);
         println!("metrics: {}", cfg.metrics.join(", "));
-        println!("\ndatasets ({}):", cfg.datasets.len());
-        for ds in &cfg.datasets {
+        // Show registry names (a config may hold a prefix); unresolvable names
+        // fall back to the raw string and are reported in `problems`.
+        let shown: Vec<&str> = cfg
+            .datasets
+            .iter()
+            .map(|ds| registry::resolve(ds).map_or(ds.as_str(), |d| d.name))
+            .collect();
+        println!("\ndatasets ({}):", shown.len());
+        for ds in &shown {
             println!("  - {ds}");
         }
         println!("\nruns ({} = methods × swept params):", runs.len());
-        for ds in &cfg.datasets {
+        for ds in &shown {
             for m in &runs {
                 println!("  - {ds} / {}", m.label(vqb::catalog::display(&m.name)));
             }
@@ -402,8 +409,8 @@ fn show(what: ShowCmd) -> Result<()> {
     match what {
         ShowCmd::Quantizers => {
             println!("Quantizers:");
-            for key in vqb::catalog::names() {
-                println!("  {key:<16} {}", vqb::catalog::describe(key));
+            for q in vqb::catalog::QUANTIZERS {
+                println!("  {:<16} {}", q.key, q.describe);
             }
         }
         ShowCmd::Primitives => {

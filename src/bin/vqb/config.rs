@@ -1,6 +1,6 @@
 //! Run config: the JSON spec, sweep expansion, and validation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -167,8 +167,9 @@ impl RunConfig {
         out
     }
 
-    /// Check datasets, method names, and metrics against what the harness knows.
-    /// Returns one message per problem; empty means the config is runnable.
+    /// Check datasets (names and local files), method names and params, and
+    /// metrics against what the harness knows. Returns one message per problem;
+    /// empty means the config is runnable.
     pub fn validate(&self) -> Vec<String> {
         let mut problems = Vec::new();
         if self.datasets.is_empty() {
@@ -178,8 +179,15 @@ impl RunConfig {
             problems.push("no methods listed".to_string());
         }
         for ds in &self.datasets {
-            if let Err(e) = registry::resolve(ds) {
-                problems.push(e.to_string());
+            match registry::resolve(ds) {
+                Ok(d) if !d.is_local() => problems.push(format!(
+                    "dataset `{}` not found at {} (run `vqb data get {}`)",
+                    d.name,
+                    d.local_path().display(),
+                    d.name
+                )),
+                Ok(_) => {}
+                Err(e) => problems.push(e.to_string()),
             }
         }
         for method in &self.methods {
@@ -188,7 +196,9 @@ impl RunConfig {
                     "unknown quantizer `{}` (see `vqb show quantizers`)",
                     method.name
                 ));
+                continue;
             }
+            problems.extend(vqb::catalog::check_params(&method.name, &method.params));
         }
         for metric in &self.metrics {
             if !KNOWN_METRICS.iter().any(|(n, _)| *n == metric) {
@@ -200,6 +210,31 @@ impl RunConfig {
                 problems.push(format!("unknown metric `{metric}` (known: {known})"));
             }
         }
+        // Value checks (param type, range, cross-param) live in each quantizer's
+        // builder: try to build every resolved method and collect any errors. A
+        // builder may use `dim`, so build once per distinct dataset dim; identical
+        // (dim-independent) errors are deduped.
+        let dims: BTreeSet<usize> = self
+            .datasets
+            .iter()
+            .filter_map(|ds| registry::resolve(ds).ok())
+            .map(|d| d.dim)
+            .collect();
+        let mut build_problems = Vec::new();
+        for m in &self.expand() {
+            if !vqb::catalog::is_known(&m.name) {
+                continue; // unknown family already reported above
+            }
+            for &dim in &dims {
+                if let Err(e) = vqb::catalog::build(&m.name, &m.params, self.seed, dim) {
+                    let label = m.label(vqb::catalog::display(&m.name));
+                    build_problems.push(format!("{label}: {e:#}"));
+                }
+            }
+        }
+        build_problems.sort();
+        build_problems.dedup();
+        problems.extend(build_problems);
         problems
     }
 }
@@ -313,7 +348,8 @@ mod tests {
     fn validate_flags_unknowns() {
         let cfg = RunConfig {
             datasets: vec!["nope".into()],
-            methods: vec![method("bogus", json!({}))],
+            // The stray param must not add a problem: the family is already unknown.
+            methods: vec![method("bogus", json!({ "x": 1 }))],
             metrics: vec!["recall".into(), "weird".into()],
             ks: default_ks(),
             temperatures: default_temperatures(),
@@ -327,5 +363,59 @@ mod tests {
         };
         let problems = cfg.validate();
         assert_eq!(problems.len(), 3); // unknown dataset, quantizer, metric
+    }
+
+    #[test]
+    fn validate_flags_unknown_params() {
+        let cfg = RunConfig {
+            datasets: vec![],
+            methods: vec![
+                method("minmax", json!({ "b": [2, 4], "bb": 8 })),
+                method("minmax", json!({ "b": 2 })),
+            ],
+            metrics: vec![],
+            ks: default_ks(),
+            temperatures: default_temperatures(),
+            seed: 1,
+            n_reconstruct: None,
+            n_eval: None,
+            n_calib: None,
+            n_base: None,
+            n_fit: None,
+            threads: None,
+        };
+        let problems = cfg.validate();
+        let param_problems: Vec<&String> = problems
+            .iter()
+            .filter(|p| p.contains("unknown param"))
+            .collect();
+        assert_eq!(param_problems.len(), 1); // `bb` only; `b` is accepted
+        assert!(param_problems[0].contains("`bb`"));
+    }
+
+    #[test]
+    fn validate_flags_wrong_typed_params() {
+        // `b` is an accepted key but not a non-negative integer. A resolvable
+        // dataset gives the build-based value check a dim to work with (the file
+        // need not be local — dim is static registry metadata).
+        let cfg = RunConfig {
+            datasets: vec!["arxiv-nomic-768-normalized".into()],
+            methods: vec![method("minmax", json!({ "b": 3.5 }))],
+            metrics: vec![],
+            ks: default_ks(),
+            temperatures: default_temperatures(),
+            seed: 1,
+            n_reconstruct: None,
+            n_eval: None,
+            n_calib: None,
+            n_base: None,
+            n_fit: None,
+            threads: None,
+        };
+        let problems = cfg.validate();
+        let param_problems: Vec<&String> =
+            problems.iter().filter(|p| p.contains("param `b`")).collect();
+        assert_eq!(param_problems.len(), 1);
+        assert!(param_problems[0].contains("non-negative integer"));
     }
 }

@@ -1,13 +1,23 @@
 //! Quantizers: named pipelines, the in-tree catalog the harness runs.
 
 pub mod catalog;
-mod minmax;
-
-pub use minmax::minmax;
 
 use ndarray::{Array2, ArrayView2};
 
 use crate::{Pipeline, Primitive, Quantizer};
+
+/// Register the in-tree quantizer families: declare each builder module and
+/// collect its `SPEC` into `QUANTIZERS`. Add a family by writing its module (with
+/// a `pub const SPEC`) and adding its name here — the only registration edit.
+macro_rules! quantizers {
+    ($($name:ident),+ $(,)?) => {
+        $(mod $name;)+
+        /// Every quantizer family the harness can build.
+        pub const QUANTIZERS: &[catalog::QuantizerSpec] = &[$($name::SPEC),+];
+    };
+}
+
+quantizers! { minmax }
 
 /// A named [`Pipeline`], runnable through the [`Quantizer`] interface. `name` is
 /// the display **family name** (e.g. `MinMax`); the runner forms a **method name**

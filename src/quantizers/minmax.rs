@@ -1,12 +1,23 @@
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
-use crate::{catalog, CastUint, MinMax, NamedQuantizer, Pipeline};
+use super::catalog::{get, QuantizerSpec};
+use crate::{CastUint, MinMax, NamedQuantizer, Pipeline};
+
+/// The `minmax` family. `get` type-checks `b` (inferred as `u8` from `minmax`);
+/// value/range checks live in the builder.
+pub const SPEC: QuantizerSpec = QuantizerSpec {
+    key: "minmax",
+    family: "MinMax",
+    params: &["b"],
+    describe: "MinMax → CastUint(b): per-vector rescale to [0,1], then a b-bit uniform lattice",
+    build: |p, _seed, _dim| Ok(minmax(get(p, "b")?)),
+};
 
 /// `minmax` to `[0, 1]` then `cast(uint, bits)` — `MinMax` feeds `CastUint` its
 /// expected input range. Family name `MinMax`; `bits` (config key `b`) is a parameter.
 pub fn minmax(bits: u8) -> NamedQuantizer {
     NamedQuantizer {
-        name: catalog::display("minmax").to_string(),
+        name: SPEC.family.to_string(),
         pipeline: Pipeline::new(vec![
             Box::new(MinMax::default()),
             Box::new(CastUint::new(bits)),
