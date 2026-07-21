@@ -631,6 +631,7 @@ pub fn run(config_path: &Path, fresh: bool) -> Result<()> {
 /// `vqb eval <config> <raw>`: recompute metrics from a `.raw` capture.
 pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
+    config::require_valid(&cfg)?;
     let exp = config_stem(config_path);
     let raw_path = if raw_arg.is_file() {
         raw_arg.to_path_buf()
@@ -638,7 +639,7 @@ pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
         raw_arg.join(format!("{exp}.raw"))
     };
     let data = raw::read(&raw_path)?;
-    let run = aggregate::run(&data, &cfg.metrics);
+    let run = aggregate::run(&data, &cfg.metrics, &cfg.ks, &cfg.temperatures);
     std::fs::create_dir_all("results").context("create results")?;
     let json_path = format!("results/{exp}.json");
     results::write_json(Path::new(&json_path), &run)?;

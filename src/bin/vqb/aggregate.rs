@@ -99,15 +99,16 @@ pub fn dataset_result(
     }
 }
 
-/// Reduce a whole capture into a `Run` (used by `vqb eval`).
-pub fn run(data: &RawData, metrics: &[String]) -> Run {
+/// Reduce a whole capture into a `Run` (used by `vqb eval`). Metrics, `ks`, and
+/// `temps` come from the eval config, not the capture's original run meta.
+pub fn run(data: &RawData, metrics: &[String], ks: &[usize], temps: &[f64]) -> Run {
     let m = &data.meta;
     Run {
         meta: RunMeta {
             name: m.name.clone(),
             seed: m.seed,
-            ks: m.ks.clone(),
-            temperatures: m.temperatures.clone(),
+            ks: ks.to_vec(),
+            temperatures: temps.to_vec(),
             n_reconstruct: m.n_reconstruct,
             timestamp: m.timestamp,
             threads: m.threads,
@@ -118,7 +119,7 @@ pub fn run(data: &RawData, metrics: &[String]) -> Run {
         datasets: data
             .datasets
             .iter()
-            .map(|d| dataset_result(d, metrics, &m.ks, &m.temperatures, m.seed))
+            .map(|d| dataset_result(d, metrics, ks, temps, m.seed))
             .collect(),
     }
 }
