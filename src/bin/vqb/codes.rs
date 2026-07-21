@@ -21,7 +21,7 @@
 //! /`label` fix the model (mismatch → stale but self-consistent results).
 
 use std::fs::File;
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
@@ -64,9 +64,13 @@ fn slug(label: &str) -> String {
 // --- writer ----------------------------------------------------------------
 
 /// Streams per-vector codes to disk, one chunk at a time, patching the header
-/// with the observed width and encode stats at the end.
+/// with the observed width and encode stats at the end. Writes to a sibling
+/// `<final>.tmp` and renames into place in `finish`, so an interrupted encode
+/// never leaves a partial file at the destination `run` reads.
 pub struct CodeWriter {
     w: BufWriter<File>,
+    tmp_path: PathBuf,
+    final_path: PathBuf,
     n_base: usize,
     width: Option<usize>,
     count: usize,
@@ -110,11 +114,15 @@ impl CodeWriter {
         header.extend_from_slice(&(model.len() as u32).to_le_bytes());
         header.extend_from_slice(model);
 
-        let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
+        let tmp_path = tmp_path(path);
+        let file =
+            File::create(&tmp_path).with_context(|| format!("create {}", tmp_path.display()))?;
         let mut w = BufWriter::new(file);
         w.write_all(&header).context("write codes header")?;
         Ok(Self {
             w,
+            tmp_path,
+            final_path: path.to_path_buf(),
             n_base,
             width: None,
             count: 0,
@@ -140,9 +148,9 @@ impl CodeWriter {
         Ok(())
     }
 
-    /// Flush, patch the header with the width and encode stats, and return
-    /// `(width, code_bytes)`.
-    pub fn finish(self, encode_s: f64, encode_peak_bytes: u64) -> Result<(usize, usize)> {
+    /// Flush, patch the header with the width and encode stats, publish atomically
+    /// (`fsync` then rename the `.tmp` into place), and return `(width, code_bytes)`.
+    pub fn finish(mut self, encode_s: f64, encode_peak_bytes: u64) -> Result<(usize, usize)> {
         if self.count != self.n_base {
             bail!(
                 "encoded {} rows, expected {} (n_base)",
@@ -151,16 +159,38 @@ impl CodeWriter {
             );
         }
         let width = self.width.unwrap_or(0);
-        let mut file = self.w.into_inner().context("flush codes")?;
         let mut patch = Vec::with_capacity(24);
         patch.extend_from_slice(&(width as u64).to_le_bytes());
         patch.extend_from_slice(&encode_s.to_le_bytes());
         patch.extend_from_slice(&encode_peak_bytes.to_le_bytes());
-        file.seek(SeekFrom::Start(PATCH_OFFSET))
-            .context("seek codes header")?;
-        file.write_all(&patch).context("patch codes header")?;
+        // Patch the header in place without unwrapping the `BufWriter`, so `self`
+        // stays whole for `Drop` (which reclaims the `.tmp` if we bail below).
+        self.w.flush().context("flush codes")?;
+        let file = self.w.get_ref();
+        file.write_all_at(&patch, PATCH_OFFSET)
+            .context("patch codes header")?;
+        file.sync_all().context("sync codes")?;
+        // The file is complete; publish it atomically. Until this rename the
+        // destination is untouched, so an interrupted encode leaves only `.tmp`.
+        std::fs::rename(&self.tmp_path, &self.final_path)
+            .with_context(|| format!("publish {}", self.final_path.display()))?;
         Ok((width, width * self.count))
     }
+}
+
+impl Drop for CodeWriter {
+    /// Best-effort clean up the temp file if `finish` didn't publish it (interrupt,
+    /// bail, or early error). A hard kill can still orphan it — fine for a cache.
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.tmp_path);
+    }
+}
+
+/// The sibling temp path a `CodeWriter` streams to before renaming into place.
+fn tmp_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
 }
 
 // --- reader ----------------------------------------------------------------
@@ -211,6 +241,27 @@ impl CodeStore {
         let label = String::from_utf8(label).context("label is not utf-8")?;
         let model = read_len_prefixed(&mut file, "model")?;
         let data_offset = (FIXED_SPAN + 4 + label.len() + 4 + model.len()) as u64;
+
+        // Validate the file length against what the header implies, so a truncated or
+        // corrupt file (e.g. a pre-atomic-rename partial encode) is rejected here — the
+        // caller opens with `.ok()`, so rejection turns a bad cache into a clean miss.
+        let actual = file
+            .metadata()
+            .with_context(|| format!("stat {}", path.display()))?
+            .len();
+        // `n` and `width` come from the (possibly corrupt) header, so size the file
+        // with checked arithmetic — overflow is itself a corruption signal, and a
+        // debug-build panic here would dodge the caller's `.ok()`.
+        let expected = (n as u64)
+            .checked_mul(width as u64)
+            .and_then(|data| data.checked_add(data_offset));
+        if expected != Some(actual) {
+            bail!(
+                "code file truncated or corrupt: {}: {actual} bytes, expected {}",
+                path.display(),
+                expected.map_or_else(|| "overflow".to_string(), |e| e.to_string()),
+            );
+        }
         Ok(Self {
             file,
             seed,
@@ -341,6 +392,54 @@ mod tests {
         let mut w = CodeWriter::create(&path, 1, 2, 2, 2, 0, 1, "stub", &[]).unwrap();
         let err = w.push_chunk(&[vec![1, 2], vec![3]]).unwrap_err();
         assert!(err.to_string().contains("fixed code width"));
+    }
+
+    #[test]
+    fn interrupted_encode_leaves_no_destination_file() {
+        let path = tmp("interrupted");
+        std::fs::remove_file(&path).ok();
+        // Encode partially, then drop the writer without `finish` (as a kill would).
+        let mut w = CodeWriter::create(&path, 1, 3, 4, 4, 0, 1, "stub", &[]).unwrap();
+        w.push_chunk(&[vec![1, 2, 3], vec![4, 5, 6]]).unwrap();
+        drop(w);
+        // The destination `run` reads was never created, and `Drop` reclaimed the
+        // sibling `.tmp` — nothing is left behind.
+        assert!(!path.exists());
+        assert!(!tmp_path(&path).exists());
+        assert!(CodeStore::open(&path).is_err());
+    }
+
+    #[test]
+    fn open_rejects_truncated_data() {
+        let path = tmp("truncated");
+        let codes: Vec<Vec<u8>> = (0..4u8).map(|i| vec![i, i, i]).collect();
+        let mut w = CodeWriter::create(&path, 1, 3, codes.len(), 4, 0, 1, "stub", &[]).unwrap();
+        w.push_chunk(&codes).unwrap();
+        w.finish(0.0, 0).unwrap();
+        // A clean file opens; lopping a byte off the data region makes it fail.
+        assert!(CodeStore::open(&path).is_ok());
+        let len = std::fs::metadata(&path).unwrap().len();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_len(len - 1).unwrap();
+        drop(f);
+        let err = CodeStore::open(&path).err().unwrap();
+        assert!(err.to_string().contains("truncated or corrupt"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn open_rejects_overflowing_header_without_panic() {
+        let path = tmp("overflow");
+        let mut w = CodeWriter::create(&path, 1, 3, 1, 1, 0, 1, "stub", &[]).unwrap();
+        w.push_chunk(&[vec![1, 2, 3]]).unwrap();
+        w.finish(0.0, 0).unwrap();
+        // Poison the header's `n` and `width` so `n * width` would overflow a u64.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.write_all_at(&u64::MAX.to_le_bytes(), 16).unwrap(); // n_base @16
+        f.write_all_at(&u64::MAX.to_le_bytes(), 48).unwrap(); // width @48
+        drop(f);
+        let err = CodeStore::open(&path).err().unwrap();
+        assert!(err.to_string().contains("truncated or corrupt"));
         std::fs::remove_file(&path).ok();
     }
 }

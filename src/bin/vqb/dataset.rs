@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use ndarray::Array2;
 
 use crate::registry::Dataset as Entry;
@@ -80,12 +80,45 @@ pub fn load(path: &Path) -> Result<Loaded> {
         None
     };
     let eval_candidates = read_neighbors(&file, "eval_candidates")?;
-    Ok(Loaded {
+    let loaded = Loaded {
         base,
         eval,
         calib,
         eval_candidates,
-    })
+    };
+    validate(&loaded).with_context(|| format!("dataset {}", path.display()))?;
+    Ok(loaded)
+}
+
+/// Reject a dataset whose arrays are empty or mutually inconsistent, so a bad file
+/// fails here with a clear message rather than panicking deep in the runner (e.g. a
+/// dim-mismatched dot product, or an out-of-range candidate index).
+fn validate(l: &Loaded) -> Result<()> {
+    let (n_base, dim) = l.base.dim();
+    ensure!(n_base > 0 && dim > 0, "base is empty ({n_base}×{dim})");
+    ensure!(l.eval.nrows() > 0, "eval is empty");
+    ensure!(
+        l.eval.ncols() == dim,
+        "eval dim {} != base dim {dim}",
+        l.eval.ncols()
+    );
+    if let Some(c) = &l.calib {
+        ensure!(c.nrows() > 0, "calib is empty");
+        ensure!(c.ncols() == dim, "calib dim {} != base dim {dim}", c.ncols());
+    }
+    ensure!(
+        l.eval_candidates.len() == l.eval.nrows(),
+        "eval_candidates has {} rows, expected one per eval query ({})",
+        l.eval_candidates.len(),
+        l.eval.nrows()
+    );
+    // Every candidate must index into `base`; the `i64 as usize` cast in
+    // `read_neighbors` wraps a negative index to a huge value, which this also catches.
+    ensure!(
+        l.eval_candidates.iter().flatten().all(|&i| i < n_base),
+        "eval_candidates contains an index outside [0, {n_base})"
+    );
+    Ok(())
 }
 
 // --- writing ---------------------------------------------------------------
@@ -129,7 +162,13 @@ pub fn get(entry: &Entry) -> Result<()> {
     download(&entry.url(), &src)?;
     println!("formatting {} ...", dest.display());
     let res = reformat(&src, &dest);
-    let _ = std::fs::remove_file(&src);
+    if res.is_ok() {
+        let _ = std::fs::remove_file(&src);
+    } else {
+        // A failed reformat may have written a partial/invalid `dest`; drop it so it
+        // isn't mistaken for a good file next run, and keep `src` for diagnosis.
+        let _ = std::fs::remove_file(&dest);
+    }
     res?;
     println!("done {}", dest.display());
     Ok(())
@@ -179,6 +218,17 @@ fn reformat(src: &Path, dest: &Path) -> Result<()> {
         write_rows(&out, "calib", l)?;
     }
     write_neighbors(&out, "eval_candidates", &nbrs)?;
+    drop(out); // flush and close before treating the file as complete
+
+    // Validate here so a bad dataset fails at `data get` time (while the source is
+    // still around for diagnosis) rather than on the next run's `load`. Reuse the
+    // in-memory arrays — no need to re-read the base back off disk.
+    validate(&Loaded {
+        base: train,
+        eval: test,
+        calib: learn,
+        eval_candidates: nbrs,
+    })?;
     Ok(())
 }
 
@@ -211,5 +261,76 @@ mod tests {
         assert_eq!(loaded.eval.dim(), (2, 2));
         assert!(loaded.calib.is_none());
         assert_eq!(loaded.eval_candidates, vec![vec![1, 3, 0], vec![2, 3, 0]]);
+    }
+
+    /// A bad source (a neighbor index outside `train`) must fail at reformat time,
+    /// not silently produce a `dest` that only `load` would later reject.
+    #[test]
+    fn reformat_rejects_out_of_range_neighbors() {
+        let dir = std::env::temp_dir().join("vqb-dataset-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("bad-src.hdf5");
+        let dest = dir.join("bad-formatted.hdf5");
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dest);
+
+        let f = hdf5::File::create(&src).unwrap();
+        let train = Array2::from_shape_vec((4, 2), vec![0., 0., 1., 0., 0., 1., 1., 1.]).unwrap();
+        let test = Array2::from_shape_vec((2, 2), vec![0.9, 0.1, 0.2, 0.8]).unwrap();
+        write_rows(&f, "train", &train).unwrap();
+        write_rows(&f, "test", &test).unwrap();
+        write_neighbors(&f, "neighbors", &[vec![1, 3, 0], vec![2, 9, 0]]).unwrap(); // 9 >= 4
+        drop(f);
+
+        let err = reformat(&src, &dest).unwrap_err();
+        assert!(err.to_string().contains("outside"));
+        std::fs::remove_file(&src).ok();
+        std::fs::remove_file(&dest).ok();
+    }
+
+    /// A well-formed `Loaded`: 4×2 base, 2×2 eval, one in-range candidate list per query.
+    fn good() -> Loaded {
+        Loaded {
+            base: Array2::zeros((4, 2)),
+            eval: Array2::zeros((2, 2)),
+            calib: None,
+            eval_candidates: vec![vec![1, 3], vec![2, 0]],
+        }
+    }
+
+    #[test]
+    fn validate_accepts_a_good_dataset() {
+        assert!(validate(&good()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_eval_dim_mismatch() {
+        let mut l = good();
+        l.eval = Array2::zeros((2, 3)); // 3 != base dim 2
+        assert!(validate(&l).unwrap_err().to_string().contains("eval dim"));
+    }
+
+    #[test]
+    fn validate_rejects_calib_dim_mismatch() {
+        let mut l = good();
+        l.calib = Some(Array2::zeros((2, 3)));
+        assert!(validate(&l).unwrap_err().to_string().contains("calib dim"));
+    }
+
+    #[test]
+    fn validate_rejects_short_candidates() {
+        let mut l = good();
+        l.eval_candidates = vec![vec![1, 3]]; // 1 row for 2 eval queries
+        assert!(validate(&l)
+            .unwrap_err()
+            .to_string()
+            .contains("eval_candidates"));
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_candidate() {
+        let mut l = good();
+        l.eval_candidates = vec![vec![1, 3], vec![2, 4]]; // 4 >= n_base 4
+        assert!(validate(&l).unwrap_err().to_string().contains("outside"));
     }
 }
