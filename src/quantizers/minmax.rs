@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use super::catalog::{get, QuantizerSpec};
-use crate::{CastUint, MinMax, NamedQuantizer, Pipeline};
+use crate::{CastUint, MinMax, Pipeline};
 
 /// The `minmax` family. `get` type-checks `b` (inferred as `u8` from `minmax`);
 /// value/range checks live in the builder.
@@ -15,23 +15,20 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     build: |p, _seed, dim| minmax(get(p, "b")?, dim),
 };
 
-/// `minmax` to `[0, 1]` then `cast(uint, bits)` — `MinMax` feeds `CastUint` its
-/// expected input range. Family name `MinMax`; `bits` (config key `b`) is a
-/// parameter; `dim` is the dataset vector dimension.
-pub fn minmax(bits: u8, dim: usize) -> Result<NamedQuantizer> {
-    Ok(NamedQuantizer {
-        name: SPEC.family.to_string(),
-        pipeline: Pipeline::new(
-            dim,
-            vec![Box::new(MinMax::default()), Box::new(CastUint::new(bits))],
-        )?,
-    })
+/// The `minmax` pipeline over input dim `dim`: rescale each vector to `[0, 1]`
+/// (`MinMax`, feeding `CastUint` its expected input range), then a `bits`-bit
+/// uniform lattice (`CastUint`; `bits` is config key `b`).
+pub fn minmax(bits: u8, dim: usize) -> Result<Pipeline> {
+    Pipeline::new(
+        dim,
+        vec![Box::new(MinMax::default()), Box::new(CastUint::new(bits))],
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Quantizer;
+    use crate::{AsQuantizer, Quantizer};
     use ndarray::{array, Array2};
 
     fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
@@ -45,8 +42,7 @@ mod tests {
         // No constant rows: a zero-range vector is unrecoverable by `MinMax`.
         let v: Array2<f32> = array![[0., 1., 2.], [4., 2., 0.], [-1., 3., 1.], [2., 0., 3.]];
         let q: Array2<f32> = array![[1., 0., -1.], [0.5, 1., 2.]];
-        let codec = minmax(8, 3).unwrap();
-        assert_eq!(codec.name, "MinMax");
+        let codec = AsQuantizer(minmax(8, 3).unwrap());
 
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
