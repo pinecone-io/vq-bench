@@ -1,12 +1,15 @@
 //! Dataset download + reformat (`vqb data get`) and loading. VIBE ships
 //! `train`/`test`/`learn`/`neighbors`; we reformat to the harness's own layout
 //! `db`/`eval`/`calib`/`eval_candidates`, then `load` reads that directly.
+//! `eval_candidates` is VIBE's shipped `neighbors` by default, or the exact
+//! brute-force top-L (by dot product) when `--candidates L` is passed.
 
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, ensure, Context, Result};
-use ndarray::Array2;
+use ndarray::{s, Array2};
 
 use crate::registry::Dataset as Entry;
 
@@ -94,28 +97,39 @@ pub fn load(path: &Path) -> Result<Loaded> {
 /// fails here with a clear message rather than panicking deep in the runner (e.g. a
 /// dim-mismatched dot product, or an out-of-range candidate index).
 fn validate(l: &Loaded) -> Result<()> {
-    let (n_base, dim) = l.base.dim();
+    validate_parts(&l.base, &l.eval, l.calib.as_ref(), &l.eval_candidates)
+}
+
+/// The `validate` checks over borrowed arrays, so the write path can validate before
+/// committing to disk without moving its in-memory arrays into a `Loaded`.
+fn validate_parts(
+    base: &Array2<f32>,
+    eval: &Array2<f32>,
+    calib: Option<&Array2<f32>>,
+    eval_candidates: &[Vec<usize>],
+) -> Result<()> {
+    let (n_base, dim) = base.dim();
     ensure!(n_base > 0 && dim > 0, "base is empty ({n_base}×{dim})");
-    ensure!(l.eval.nrows() > 0, "eval is empty");
+    ensure!(eval.nrows() > 0, "eval is empty");
     ensure!(
-        l.eval.ncols() == dim,
+        eval.ncols() == dim,
         "eval dim {} != base dim {dim}",
-        l.eval.ncols()
+        eval.ncols()
     );
-    if let Some(c) = &l.calib {
+    if let Some(c) = calib {
         ensure!(c.nrows() > 0, "calib is empty");
         ensure!(c.ncols() == dim, "calib dim {} != base dim {dim}", c.ncols());
     }
     ensure!(
-        l.eval_candidates.len() == l.eval.nrows(),
+        eval_candidates.len() == eval.nrows(),
         "eval_candidates has {} rows, expected one per eval query ({})",
-        l.eval_candidates.len(),
-        l.eval.nrows()
+        eval_candidates.len(),
+        eval.nrows()
     );
     // Every candidate must index into `base`; the `i64 as usize` cast in
     // `read_neighbors` wraps a negative index to a huge value, which this also catches.
     ensure!(
-        l.eval_candidates.iter().flatten().all(|&i| i < n_base),
+        eval_candidates.iter().flatten().all(|&i| i < n_base),
         "eval_candidates contains an index outside [0, {n_base})"
     );
     Ok(())
@@ -149,9 +163,21 @@ fn write_neighbors(file: &hdf5::File, name: &str, nbrs: &[Vec<usize>]) -> Result
 // --- data get --------------------------------------------------------------
 
 /// Download `entry` from VIBE and reformat into the harness layout at its local path.
-pub fn get(entry: &Entry) -> Result<()> {
+/// `candidates` sets the `eval_candidates` width L: `None` keeps VIBE's shipped
+/// neighbors, `Some(l)` recomputes the exact top-L by brute force. When the file is
+/// already local, only the candidates are rebuilt (in place) if L differs.
+pub fn get(entry: &Entry, candidates: Option<usize>) -> Result<()> {
     let dest = entry.local_path();
     if dest.exists() {
+        if let Some(l) = candidates {
+            // `top_neighbors` clamps the stored width to the base size, so compare against the
+            // clamped target — otherwise `--candidates L` with L > n_base never converges.
+            let target = l.min(stored_base_rows(&dest)?);
+            if current_candidate_width(&dest)? != target {
+                println!("recomputing {l} candidate(s) for {} ...", dest.display());
+                rewrite_candidates(&dest, l)?;
+            }
+        }
         println!("have {}", dest.display());
         return Ok(());
     }
@@ -161,13 +187,12 @@ pub fn get(entry: &Entry) -> Result<()> {
     let src = dest.with_extension("src.hdf5");
     download(&entry.url(), &src)?;
     println!("formatting {} ...", dest.display());
-    let res = reformat(&src, &dest);
+    let res = reformat(&src, &dest, candidates);
+    // `reformat` writes `dest` atomically (see `write_dataset`), so a failure never
+    // leaves a partial file there. Drop `src` once we're done, but keep it around on
+    // failure for diagnosis.
     if res.is_ok() {
         let _ = std::fs::remove_file(&src);
-    } else {
-        // A failed reformat may have written a partial/invalid `dest`; drop it so it
-        // isn't mistaken for a good file next run, and keep `src` for diagnosis.
-        let _ = std::fs::remove_file(&dest);
     }
     res?;
     println!("done {}", dest.display());
@@ -193,15 +218,11 @@ fn download(url: &str, out: &Path) -> Result<()> {
 }
 
 /// Read a VIBE source file and write the harness-formatted file:
-/// `base←train`, `eval←test`, `calib←learn` (if present), `eval_candidates←neighbors`.
-fn reformat(src: &Path, dest: &Path) -> Result<()> {
+/// `base←train`, `eval←test`, `calib←learn` (if present). `eval_candidates` is
+/// VIBE's `neighbors` when `candidates` is `None`, or the exact brute-force top-L
+/// of `test` against `train` when `Some(l)`.
+fn reformat(src: &Path, dest: &Path, candidates: Option<usize>) -> Result<()> {
     let inf = hdf5::File::open(src).with_context(|| format!("opening source {}", src.display()))?;
-    if !has(&inf, "neighbors") {
-        bail!(
-            "source {} has no `neighbors`; brute-force ground truth not implemented",
-            src.display()
-        );
-    }
     let train = read_rows(&inf, "train")?;
     let test = read_rows(&inf, "test")?;
     let learn = if has(&inf, "learn") {
@@ -209,27 +230,159 @@ fn reformat(src: &Path, dest: &Path) -> Result<()> {
     } else {
         None
     };
-    let nbrs = read_neighbors(&inf, "neighbors")?;
+    let nbrs = match candidates {
+        Some(l) => top_neighbors(&test, &train, l),
+        None if has(&inf, "neighbors") => read_neighbors(&inf, "neighbors")?,
+        None => bail!(
+            "source {} has no `neighbors`; pass `--candidates L` to brute-force ground truth",
+            src.display()
+        ),
+    };
+    write_dataset(dest, &train, &test, learn.as_ref(), &nbrs)
+}
 
-    let out = hdf5::File::create(dest).with_context(|| format!("creating {}", dest.display()))?;
-    write_rows(&out, "base", &train)?;
-    write_rows(&out, "eval", &test)?;
-    if let Some(l) = &learn {
-        write_rows(&out, "calib", l)?;
+/// Write a complete harness dataset to `dest` atomically: build it in a temp file,
+/// then rename over `dest` once fully written. An interrupted or failed write thus
+/// never leaves a partial file at `dest` that a later `get` would mistake for valid.
+fn write_dataset(
+    dest: &Path,
+    base: &Array2<f32>,
+    eval: &Array2<f32>,
+    calib: Option<&Array2<f32>>,
+    candidates: &[Vec<usize>],
+) -> Result<()> {
+    // Validate before touching disk, so a bad dataset fails at `data get` time (while
+    // the source is still around for diagnosis) rather than on the next run's `load`,
+    // and without leaving even a temp file behind.
+    validate_parts(base, eval, calib, candidates)?;
+    let tmp = dest.with_extension("tmp.hdf5");
+    let _ = std::fs::remove_file(&tmp); // clear any leftover from a prior crash
+    let build = || -> Result<()> {
+        // Scope the file so it is closed (and flushed to disk) before the rename.
+        let out =
+            hdf5::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        write_rows(&out, "base", base)?;
+        write_rows(&out, "eval", eval)?;
+        if let Some(c) = calib {
+            write_rows(&out, "calib", c)?;
+        }
+        write_neighbors(&out, "eval_candidates", candidates)?;
+        Ok(())
+    };
+    match build() {
+        Ok(()) => {
+            // hdf5's close flushes but doesn't fsync; sync before the rename so a crash just
+            // after can't leave a truncated file at `dest` (mirrors `codes.rs::finish`).
+            std::fs::File::open(&tmp)
+                .and_then(|f| f.sync_all())
+                .with_context(|| format!("syncing {}", tmp.display()))?;
+            std::fs::rename(&tmp, dest).context("installing dataset (rename temp)")
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
     }
-    write_neighbors(&out, "eval_candidates", &nbrs)?;
-    drop(out); // flush and close before treating the file as complete
+}
 
-    // Validate here so a bad dataset fails at `data get` time (while the source is
-    // still around for diagnosis) rather than on the next run's `load`. Reuse the
-    // in-memory arrays — no need to re-read the base back off disk.
-    validate(&Loaded {
-        base: train,
-        eval: test,
-        calib: learn,
-        eval_candidates: nbrs,
-    })?;
-    Ok(())
+/// Target size of one eval×base score tile (~256 MB), bounding peak memory when
+/// brute-forcing candidates over a full (possibly ~1M-row) base.
+const SCORE_TILE_BYTES: usize = 256 << 20;
+
+/// Exact top-`l` base indices (descending dot product) for each eval query. Chunks
+/// over eval rows so the score tile never materializes the whole `n_eval × n_base`
+/// matrix; picks the top-`l` per row with a partial sort. Clamped to `base.nrows()`.
+fn top_neighbors(eval: &Array2<f32>, base: &Array2<f32>, l: usize) -> Vec<Vec<usize>> {
+    let n_db = base.nrows();
+    let l = l.min(n_db);
+    if n_db == 0 {
+        return vec![Vec::new(); eval.nrows()];
+    }
+    let n_eval = eval.nrows();
+    let batch = (SCORE_TILE_BYTES / (n_db * 4)).clamp(1, n_eval.max(1));
+    let desc = |s: &[f32], a: usize, b: usize| {
+        s[b].partial_cmp(&s[a]).unwrap_or(std::cmp::Ordering::Equal)
+    };
+    // Only worth a progress bar when the work spans more than one tile (a full base);
+    // trivial single-tile inputs (and the unit tests) stay silent.
+    let show = n_eval > batch;
+    // `base.t()` is not row-major, so hoist the transposed copy out of the loop; otherwise
+    // `matmul`'s internal `as_standard_layout` rebuilds a full ~n_db×d copy every tile.
+    let base_t = base.t().as_standard_layout().to_owned();
+    let mut out = Vec::with_capacity(n_eval);
+    let mut idx: Vec<usize> = Vec::with_capacity(n_db); // reused across rows
+    for start in (0..n_eval).step_by(batch) {
+        let end = (start + batch).min(n_eval);
+        let scores = vqb::matmul(eval.slice(s![start..end, ..]), base_t.view());
+        for row in scores.rows() {
+            let s = row.as_slice().expect("contiguous score row");
+            idx.clear();
+            idx.extend(0..n_db);
+            if l < n_db {
+                idx.select_nth_unstable_by(l, |&a, &b| desc(s, a, b));
+                idx.truncate(l);
+            }
+            idx.sort_by(|&a, &b| desc(s, a, b));
+            out.push(idx.clone());
+        }
+        if show {
+            draw_progress(end, n_eval);
+        }
+    }
+    if show {
+        eprintln!();
+    }
+    out
+}
+
+/// Redraw an in-place `[████░░░░] done/total` bar on stderr (carriage return, no newline).
+fn draw_progress(done: usize, total: usize) {
+    const WIDTH: usize = 20;
+    let filled = (done * WIDTH / total.max(1)).min(WIDTH);
+    let bar: String = "█".repeat(filled) + &"░".repeat(WIDTH - filled);
+    eprint!("\r  candidates [{bar}] {done}/{total}");
+    let _ = std::io::stderr().flush();
+}
+
+/// Number of `base` rows stored in `path`.
+fn stored_base_rows(path: &Path) -> Result<usize> {
+    let file = hdf5::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let shape = file.dataset("base").context("dataset `base`")?.shape();
+    if shape.len() != 2 {
+        bail!("`base` must be 2-D, got shape {shape:?}");
+    }
+    Ok(shape[0])
+}
+
+/// Width (L) of the `eval_candidates` already stored in `path`.
+fn current_candidate_width(path: &Path) -> Result<usize> {
+    let file = hdf5::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let ds = file
+        .dataset("eval_candidates")
+        .context("dataset `eval_candidates`")?;
+    let shape = ds.shape();
+    if shape.len() != 2 {
+        bail!("`eval_candidates` must be 2-D, got shape {shape:?}");
+    }
+    Ok(shape[1])
+}
+
+/// Recompute `eval_candidates` at width `l` from the stored `base`/`eval`. Reads the
+/// existing file read-only and writes a fresh one atomically (see `write_dataset`), so
+/// an interrupted recompute leaves the previous dataset intact rather than corrupting
+/// it in place — at the cost of rewriting the (large) `base`.
+fn rewrite_candidates(path: &Path, l: usize) -> Result<()> {
+    let (base, eval, calib) = {
+        let file = hdf5::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let base = read_rows(&file, "base")?;
+        let eval = read_rows(&file, "eval")?;
+        let calib = has(&file, "calib")
+            .then(|| read_rows(&file, "calib"))
+            .transpose()?;
+        (base, eval, calib)
+    };
+    let cands = top_neighbors(&eval, &base, l);
+    write_dataset(path, &base, &eval, calib.as_ref(), &cands)
 }
 
 #[cfg(test)]
@@ -255,7 +408,7 @@ mod tests {
         write_neighbors(&f, "neighbors", &[vec![1, 3, 0], vec![2, 3, 0]]).unwrap();
         drop(f);
 
-        reformat(&src, &dest).unwrap();
+        reformat(&src, &dest, None).unwrap();
         let loaded = load(&dest).unwrap();
         assert_eq!(loaded.base.dim(), (4, 2));
         assert_eq!(loaded.eval.dim(), (2, 2));
@@ -282,7 +435,7 @@ mod tests {
         write_neighbors(&f, "neighbors", &[vec![1, 3, 0], vec![2, 9, 0]]).unwrap(); // 9 >= 4
         drop(f);
 
-        let err = reformat(&src, &dest).unwrap_err();
+        let err = reformat(&src, &dest, None).unwrap_err();
         assert!(err.to_string().contains("outside"));
         std::fs::remove_file(&src).ok();
         std::fs::remove_file(&dest).ok();
@@ -332,5 +485,58 @@ mod tests {
         let mut l = good();
         l.eval_candidates = vec![vec![1, 3], vec![2, 4]]; // 4 >= n_base 4
         assert!(validate(&l).unwrap_err().to_string().contains("outside"));
+    }
+
+    /// A 4-row base and 2 queries; brute-force top-L must pick the exact descending
+    /// neighbors by dot product, and clamp L to the base size.
+    #[test]
+    fn top_neighbors_picks_exact_descending() {
+        let base = Array2::from_shape_vec((4, 2), vec![0., 0., 1., 0., 0., 1., 1., 1.]).unwrap();
+        let eval = Array2::from_shape_vec((2, 2), vec![0.9, 0.1, 0.2, 0.8]).unwrap();
+        // q0·rows = [0, .9, .1, 1.0] → top2 {3,1}; q1·rows = [0, .2, .8, 1.0] → top2 {3,2}.
+        assert_eq!(top_neighbors(&eval, &base, 2), vec![vec![3, 1], vec![3, 2]]);
+        // L past the base size clamps to all 4, still fully sorted descending.
+        let all = top_neighbors(&eval, &base, 100);
+        assert_eq!(all[0], vec![3, 1, 2, 0]);
+        assert_eq!(all[1], vec![3, 2, 1, 0]);
+    }
+
+    /// `--candidates` ignores the shipped `neighbors` and bakes the brute-force top-L.
+    #[test]
+    fn reformat_with_candidates_overrides_neighbors() {
+        let dir = std::env::temp_dir().join("vqb-dataset-cand-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.hdf5");
+        let dest = dir.join("formatted.hdf5");
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dest);
+
+        let f = hdf5::File::create(&src).unwrap();
+        let train = Array2::from_shape_vec((4, 2), vec![0., 0., 1., 0., 0., 1., 1., 1.]).unwrap();
+        let test = Array2::from_shape_vec((2, 2), vec![0.9, 0.1, 0.2, 0.8]).unwrap();
+        write_rows(&f, "train", &train).unwrap();
+        write_rows(&f, "test", &test).unwrap();
+        // Deliberately wrong shipped neighbors — must be overridden by --candidates.
+        write_neighbors(&f, "neighbors", &[vec![0, 0, 0], vec![0, 0, 0]]).unwrap();
+        drop(f);
+
+        reformat(&src, &dest, Some(2)).unwrap();
+        let loaded = load(&dest).unwrap();
+        assert_eq!(loaded.eval_candidates, vec![vec![3, 1], vec![3, 2]]);
+
+        // Re-widening an existing file rebuilds it atomically at the new width.
+        rewrite_candidates(&dest, 3).unwrap();
+        assert_eq!(current_candidate_width(&dest).unwrap(), 3);
+        let widened = load(&dest).unwrap();
+        assert_eq!(widened.eval_candidates, vec![vec![3, 1, 2], vec![3, 2, 1]]);
+        // The atomic writer leaves no temp behind on success.
+        assert!(!dest.with_extension("tmp.hdf5").exists());
+
+        // Requesting L past the base size clamps the stored width to n_base, so a
+        // subsequent `get` sees a matching (clamped) target and does not re-run.
+        rewrite_candidates(&dest, 100).unwrap();
+        let n_base = stored_base_rows(&dest).unwrap();
+        assert_eq!(current_candidate_width(&dest).unwrap(), n_base);
+        assert_eq!(current_candidate_width(&dest).unwrap(), 100usize.min(n_base));
     }
 }

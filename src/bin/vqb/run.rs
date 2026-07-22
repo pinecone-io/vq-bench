@@ -439,6 +439,16 @@ fn run_dataset<W: std::io::Write>(
     };
     let n_candidates = candidates.first().map_or(0, Vec::len);
 
+    // The candidate pool is baked into the dataset (`vqb data get --candidates L`), so
+    // `config::validate` can't see its width — warn here when a requested k outruns it,
+    // since recall/SOS@k are then clamped to the pool rather than the true top-k.
+    if let Some(&k) = cfg.ks.iter().filter(|&&k| k > n_candidates).max() {
+        eprintln!(
+            "  warning: k={k} exceeds the {n_candidates}-candidate pool; \
+             recall/SOS@k are clamped (rebuild with `vqb data get {name} --candidates {k}`)"
+        );
+    }
+
     let recon_idx = subset_indices(
         n_base,
         cfg.n_reconstruct.unwrap_or(usize::MAX),

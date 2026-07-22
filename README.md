@@ -46,10 +46,13 @@ cargo install --path . # installs the vqb binary
 
 Datasets are HDF5 files sourced from [VIBE](https://vector-index-bench.github.io) (all normalized, scored by dot product). Each holds `base` vectors to encode and search, `eval` queries, their `eval_candidates` (true top-neighbors), and optional `calib` calibration queries. Files resolve under `$VQB_DATA_DIR` (default `data/`).
 
+`eval_candidates` defaults to VIBE's shipped top-neighbors (~100 per query). Pass `--candidates L` to instead bake the exact top-L neighbors, brute-forced by dot product against `base` — needed to score recall/SOS at `k` beyond the shipped pool. Re-running with a different `L` rebuilds just the candidates in place.
+
 ```bash
-vqb data list            # list of supported datasets
-vqb data info <name>     # information for a given dataset
-vqb data get <name>      # download dataset and reformat into a standard layout
+vqb data list                  # list of supported datasets
+vqb data info <name>           # information for a given dataset
+vqb data get <name>            # download dataset and reformat into a standard layout
+vqb data get <name> -l 1000    # ... with the exact top-1000 candidates per query
 ```
 
 Dataset names accept any unique prefix (`arxiv` resolves to `arxiv-nomic-768-…`).

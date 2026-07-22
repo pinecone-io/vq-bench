@@ -121,7 +121,13 @@ enum DataCmd {
     #[command(visible_alias = "ls")]
     List,
     /// Download and format a dataset into the required HDF5 structure.
-    Get { dataset: String },
+    Get {
+        dataset: String,
+        /// Candidate pool width L: recompute the exact top-L neighbors by brute
+        /// force instead of using VIBE's shipped ~100 (rebuilds in place if local).
+        #[arg(long, short = 'l')]
+        candidates: Option<usize>,
+    },
     /// Print metadata for a dataset.
     #[command(visible_alias = "i")]
     Info { dataset: String },
@@ -186,17 +192,20 @@ fn data(action: DataCmd) -> Result<()> {
             println!("arrays: base, calib, eval, eval_candidates");
             Ok(())
         }
-        DataCmd::Get { dataset } => data_get(&dataset),
+        DataCmd::Get {
+            dataset,
+            candidates,
+        } => data_get(&dataset, candidates),
     }
 }
 
 #[cfg(feature = "hdf5")]
-fn data_get(name: &str) -> Result<()> {
-    dataset::get(registry::resolve(name)?)
+fn data_get(name: &str, candidates: Option<usize>) -> Result<()> {
+    dataset::get(registry::resolve(name)?, candidates)
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn data_get(_name: &str) -> Result<()> {
+fn data_get(_name: &str, _candidates: Option<usize>) -> Result<()> {
     bail!("`vqb data get` needs the hdf5 feature; rebuild with default features")
 }
 
