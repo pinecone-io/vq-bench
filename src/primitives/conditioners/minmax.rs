@@ -149,10 +149,16 @@ mod tests {
     fn composes_with_cast() {
         let v = array![[0., 1., 2., 3.], [4., 6., 8., 10.]];
         let q = array![[1., 0., -1., 2.], [0.5, 1., 0., 0.]];
-        let codec = AsQuantizer(Pipeline::new(vec![
-            Box::new(MinMax::default()) as Box<dyn Primitive>,
-            Box::new(crate::CastUint::new(4)),
-        ]));
+        let codec = AsQuantizer(
+            Pipeline::new(
+                4,
+                vec![
+                    Box::new(MinMax::default()) as Box<dyn Primitive>,
+                    Box::new(crate::CastUint::new(4)),
+                ],
+            )
+            .unwrap(),
+        );
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
         let r = refs(&codes);

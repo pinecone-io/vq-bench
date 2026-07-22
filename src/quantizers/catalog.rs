@@ -49,6 +49,12 @@ pub fn display(key: &str) -> &str {
     lookup(key).map_or(key, |q| q.family)
 }
 
+/// A one-line description of a family's pipeline, for `vqb show q`; unknown keys
+/// yield an empty string.
+pub fn describe(key: &str) -> &str {
+    lookup(key).map_or("", |q| q.describe)
+}
+
 /// Build the quantizer `key` from its params. `seed`/`dim` feed seeded and
 /// dim-dependent primitives. Errors on an unknown family or bad param values —
 /// the latter is how `validate` surfaces value problems (see `RunConfig::validate`).
@@ -59,7 +65,7 @@ pub fn build(
     dim: usize,
 ) -> Result<NamedQuantizer> {
     let spec = lookup(key).ok_or_else(|| anyhow!("no factory for quantizer `{key}`"))?;
-    (spec.build)(params, seed, dim)
+    (spec.build)(params, seed, dim).with_context(|| format!("quantizer `{key}`"))
 }
 
 /// Unknown-param problems for a configured method: config keys the family doesn't

@@ -1,5 +1,7 @@
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
+use anyhow::Result;
+
 use super::catalog::{get, QuantizerSpec};
 use crate::{CastUint, MinMax, NamedQuantizer, Pipeline};
 
@@ -10,19 +12,20 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "MinMax",
     params: &["b"],
     describe: "MinMax → CastUint(b): per-vector rescale to [0,1], then a b-bit uniform lattice",
-    build: |p, _seed, _dim| Ok(minmax(get(p, "b")?)),
+    build: |p, _seed, dim| minmax(get(p, "b")?, dim),
 };
 
 /// `minmax` to `[0, 1]` then `cast(uint, bits)` — `MinMax` feeds `CastUint` its
-/// expected input range. Family name `MinMax`; `bits` (config key `b`) is a parameter.
-pub fn minmax(bits: u8) -> NamedQuantizer {
-    NamedQuantizer {
+/// expected input range. Family name `MinMax`; `bits` (config key `b`) is a
+/// parameter; `dim` is the dataset vector dimension.
+pub fn minmax(bits: u8, dim: usize) -> Result<NamedQuantizer> {
+    Ok(NamedQuantizer {
         name: SPEC.family.to_string(),
-        pipeline: Pipeline::new(vec![
-            Box::new(MinMax::default()),
-            Box::new(CastUint::new(bits)),
-        ]),
-    }
+        pipeline: Pipeline::new(
+            dim,
+            vec![Box::new(MinMax::default()), Box::new(CastUint::new(bits))],
+        )?,
+    })
 }
 
 #[cfg(test)]
@@ -42,7 +45,7 @@ mod tests {
         // No constant rows: a zero-range vector is unrecoverable by `MinMax`.
         let v: Array2<f32> = array![[0., 1., 2.], [4., 2., 0.], [-1., 3., 1.], [2., 0., 3.]];
         let q: Array2<f32> = array![[1., 0., -1.], [0.5, 1., 2.]];
-        let codec = minmax(8);
+        let codec = minmax(8, 3).unwrap();
         assert_eq!(codec.name, "MinMax");
 
         let model = codec.fit(v.view(), None);

@@ -117,11 +117,17 @@ mod tests {
         // rotate → minmax → cast: round-trip within lattice error, exact asymmetric score.
         let v = array![[0., 1., 2., 3.], [4., 6., 8., 10.], [-2., 1., 0., 5.]];
         let q = array![[1., 0., -1., 2.], [0.5, 1., 0., 0.]];
-        let codec = AsQuantizer(Pipeline::new(vec![
-            Box::new(RandomRotate::new(3)) as Box<dyn Primitive>,
-            Box::new(MinMax::default()),
-            Box::new(CastUint::new(8)),
-        ]));
+        let codec = AsQuantizer(
+            Pipeline::new(
+                4,
+                vec![
+                    Box::new(RandomRotate::new(3)) as Box<dyn Primitive>,
+                    Box::new(MinMax::default()),
+                    Box::new(CastUint::new(8)),
+                ],
+            )
+            .unwrap(),
+        );
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
         let r = refs(&codes);

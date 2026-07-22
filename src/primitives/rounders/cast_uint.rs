@@ -157,10 +157,16 @@ mod tests {
     fn size_accounting() {
         use crate::{byte_split, AsQuantizer, Pipeline, Quantizer};
         let v = array![[0., 1., 2., 3.], [4., 6., 8., 10.]]; // 2 vectors, d = 4
-        let codec = AsQuantizer(Pipeline::new(vec![
-            Box::new(crate::MinMax::default()) as Box<dyn Primitive>,
-            Box::new(CastUint::new(2)),
-        ]));
+        let codec = AsQuantizer(
+            Pipeline::new(
+                4,
+                vec![
+                    Box::new(crate::MinMax::default()) as Box<dyn Primitive>,
+                    Box::new(CastUint::new(2)),
+                ],
+            )
+            .unwrap(),
+        );
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
         // per vector: minmax 8 bytes + cast ceil(4*2/8)=1 = 9; ×2 = 18.

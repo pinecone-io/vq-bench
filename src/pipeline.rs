@@ -1,5 +1,6 @@
 //! The [`Pipeline`] executor.
 
+use anyhow::{bail, Result};
 use ndarray::{Array2, ArrayView2};
 
 use crate::coding::{put_len, take, take_len};
@@ -8,34 +9,35 @@ use crate::Primitive;
 /// A linear chain of stages, itself a [`Primitive`].
 pub struct Pipeline {
     stages: Vec<Box<dyn Primitive>>,
+    /// Input dim each stage sees; `in_dims[0]` is the pipeline's input dim.
+    in_dims: Vec<usize>,
 }
 
 impl Pipeline {
-    /// Build a pipeline from its stages (must be non-empty).
-    pub fn new(stages: Vec<Box<dyn Primitive>>) -> Self {
+    /// Build a pipeline over input dim `d` from its stages (must be non-empty).
+    /// Errors if a stage declares an input dim that mismatches the chain.
+    pub fn new(d: usize, stages: Vec<Box<dyn Primitive>>) -> Result<Self> {
         assert!(!stages.is_empty(), "a pipeline needs at least one stage");
-        Self { stages }
-    }
-
-    /// Input dim seen by each stage, given the pipeline's input dim.
-    fn in_dims(&self, d: usize) -> Vec<usize> {
         let mut dim = d;
-        self.stages
-            .iter()
-            .map(|s| {
-                let here = dim;
-                dim = s.out_dim(dim);
-                here
-            })
-            .collect()
+        let mut in_dims = Vec::with_capacity(stages.len());
+        for (i, s) in stages.iter().enumerate() {
+            if let Some(expected) = s.in_dim() {
+                if expected != dim {
+                    bail!("stage {i} expects input dim {expected}, gets {dim}");
+                }
+            }
+            in_dims.push(dim);
+            dim = s.out_dim(dim);
+        }
+        Ok(Self { stages, in_dims })
     }
 
     /// Split each combined per-vector code into one slice per stage.
-    fn split_codes<'a>(&self, in_dims: &[usize], combined: &[&'a [u8]]) -> Vec<Vec<&'a [u8]>> {
+    fn split_codes<'a>(&self, combined: &[&'a [u8]]) -> Vec<Vec<&'a [u8]>> {
         let lens: Vec<Option<usize>> = self
             .stages
             .iter()
-            .zip(in_dims)
+            .zip(&self.in_dims)
             .map(|(s, &d)| s.code_bytes(d))
             .collect();
         let mut out: Vec<Vec<&'a [u8]>> = (0..self.stages.len())
@@ -55,10 +57,9 @@ impl Pipeline {
     }
 }
 
-/// Pack the input dim and per-stage models into one blob.
-fn pack_model(d: usize, stage_models: &[Vec<u8>]) -> Vec<u8> {
+/// Pack the per-stage models into one blob.
+fn pack_model(stage_models: &[Vec<u8>]) -> Vec<u8> {
     let mut buf = Vec::new();
-    put_len(&mut buf, d);
     for m in stage_models {
         put_len(&mut buf, m.len());
         buf.extend_from_slice(m);
@@ -66,22 +67,24 @@ fn pack_model(d: usize, stage_models: &[Vec<u8>]) -> Vec<u8> {
     buf
 }
 
-/// Unpack the input dim and `n_stages` per-stage model slices.
-fn unpack_model(model: &[u8], n_stages: usize) -> (usize, Vec<&[u8]>) {
+/// Unpack `n_stages` per-stage model slices.
+fn unpack_model(model: &[u8], n_stages: usize) -> Vec<&[u8]> {
     let mut cur = model;
-    let d = take_len(&mut cur);
-    let models = (0..n_stages)
+    (0..n_stages)
         .map(|_| {
             let len = take_len(&mut cur);
             take(&mut cur, len)
         })
-        .collect();
-    (d, models)
+        .collect()
 }
 
 impl Primitive for Pipeline {
     fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        let d = vectors.ncols();
+        assert_eq!(
+            vectors.ncols(),
+            self.in_dims[0],
+            "pipeline built for another dim"
+        );
         let mut v = vectors.to_owned();
         let mut q = queries.map(|q| q.to_owned());
         let last = self.stages.len() - 1;
@@ -98,19 +101,18 @@ impl Primitive for Pipeline {
             }
             models.push(model);
         }
-        pack_model(d, &models)
+        pack_model(&models)
     }
 
     fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        let (d, models) = unpack_model(model, self.stages.len());
-        debug_assert_eq!(d, vectors.ncols());
+        let models = unpack_model(model, self.stages.len());
+        debug_assert_eq!(vectors.ncols(), self.in_dims[0]);
         let mut v = vectors.to_owned();
         let mut combined = vec![Vec::new(); vectors.nrows()];
-        let mut dim = d;
         let last = self.stages.len() - 1;
         for (i, stage) in self.stages.iter().enumerate() {
             let codes = stage.encode(models[i], v.view());
-            match stage.code_bytes(dim) {
+            match stage.code_bytes(self.in_dims[i]) {
                 Some(n) => {
                     for (out, code) in combined.iter_mut().zip(&codes) {
                         debug_assert_eq!(code.len(), n);
@@ -128,22 +130,20 @@ impl Primitive for Pipeline {
                 let refs: Vec<&[u8]> = codes.iter().map(Vec::as_slice).collect();
                 stage.apply(models[i], &mut v, &refs);
             }
-            dim = stage.out_dim(dim);
         }
         combined
     }
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, codes: &[&[u8]]) {
-        let (d, models) = unpack_model(model, self.stages.len());
-        let in_dims = self.in_dims(d);
-        let stage_codes = self.split_codes(&in_dims, codes);
+        let models = unpack_model(model, self.stages.len());
+        let stage_codes = self.split_codes(codes);
         for (i, stage) in self.stages.iter().enumerate() {
             stage.apply(models[i], vectors, &stage_codes[i]);
         }
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        let (_, models) = unpack_model(model, self.stages.len());
+        let models = unpack_model(model, self.stages.len());
         for (i, stage) in self.stages.iter().enumerate() {
             stage.apply_queries(models[i], queries);
         }
@@ -155,9 +155,8 @@ impl Primitive for Pipeline {
         codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let (d, models) = unpack_model(model, self.stages.len());
-        let in_dims = self.in_dims(d);
-        let stage_codes = self.split_codes(&in_dims, codes);
+        let models = unpack_model(model, self.stages.len());
+        let stage_codes = self.split_codes(codes);
         let mut downstream = child_recons.map(|c| c.to_owned());
         for i in (0..self.stages.len()).rev() {
             let child = downstream.as_ref().map(|a| a.view());
@@ -173,9 +172,8 @@ impl Primitive for Pipeline {
         codes: &[&[u8]],
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let (d, models) = unpack_model(model, self.stages.len());
-        let in_dims = self.in_dims(d);
-        let stage_codes = self.split_codes(&in_dims, codes);
+        let models = unpack_model(model, self.stages.len());
+        let stage_codes = self.split_codes(codes);
 
         // Forward: the query batch each stage sees.
         let mut stage_queries = Vec::with_capacity(self.stages.len());
@@ -202,18 +200,23 @@ impl Primitive for Pipeline {
         downstream.expect("non-empty pipeline")
     }
 
+    fn in_dim(&self) -> Option<usize> {
+        Some(self.in_dims[0])
+    }
+
     fn out_dim(&self, in_dim: usize) -> usize {
-        self.stages.iter().fold(in_dim, |dim, s| s.out_dim(dim))
+        debug_assert_eq!(in_dim, self.in_dims[0]);
+        let last = self.stages.len() - 1;
+        self.stages[last].out_dim(self.in_dims[last])
     }
 
     fn code_bytes(&self, in_dim: usize) -> Option<usize> {
-        let mut total = 0;
-        let mut dim = in_dim;
-        for stage in &self.stages {
-            total += stage.code_bytes(dim)?;
-            dim = stage.out_dim(dim);
-        }
-        Some(total)
+        debug_assert_eq!(in_dim, self.in_dims[0]);
+        self.stages
+            .iter()
+            .zip(&self.in_dims)
+            .map(|(s, &d)| s.code_bytes(d))
+            .sum()
     }
 }
 
@@ -374,6 +377,35 @@ mod tests {
         }
     }
 
+    /// A stage pinned to a fixed input dim (exercises the chain dim check).
+    struct FixedDim(usize);
+    impl Primitive for FixedDim {
+        fn apply(&self, _model: &[u8], _vectors: &mut Array2<f32>, _codes: &[&[u8]]) {}
+        fn reconstruct(
+            &self,
+            _model: &[u8],
+            _codes: &[&[u8]],
+            child_recons: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
+            child_recons.expect("fixeddim is not terminal").to_owned()
+        }
+        fn score(
+            &self,
+            _model: &[u8],
+            _queries: ArrayView2<f32>,
+            _codes: &[&[u8]],
+            child_scores: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
+            child_scores.expect("fixeddim is not terminal").to_owned()
+        }
+        fn in_dim(&self) -> Option<usize> {
+            Some(self.0)
+        }
+        fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+            Some(0)
+        }
+    }
+
     // --- helpers --------------------------------------------------------
 
     /// Integer-valued data with integer per-column means ([1, 3, 2]).
@@ -398,7 +430,7 @@ mod tests {
     #[test]
     fn single_stage_roundtrip() {
         let (v, q) = (data(), queries());
-        let codec = AsQuantizer(Pipeline::new(vec![Box::new(IntRound)]));
+        let codec = AsQuantizer(Pipeline::new(3, vec![Box::new(IntRound)]).unwrap());
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
 
@@ -412,7 +444,8 @@ mod tests {
     #[test]
     fn two_stage_roundtrip() {
         let (v, q) = (data(), queries());
-        let codec = AsQuantizer(Pipeline::new(vec![Box::new(Center), Box::new(IntRound)]));
+        let codec =
+            AsQuantizer(Pipeline::new(3, vec![Box::new(Center), Box::new(IntRound)]).unwrap());
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
 
@@ -427,7 +460,8 @@ mod tests {
     #[test]
     fn variable_width_framing() {
         let v = data();
-        let codec = AsQuantizer(Pipeline::new(vec![Box::new(VarTag), Box::new(IntRound)]));
+        let codec =
+            AsQuantizer(Pipeline::new(3, vec![Box::new(VarTag), Box::new(IntRound)]).unwrap());
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
 
@@ -439,24 +473,34 @@ mod tests {
     #[test]
     fn size_accounting() {
         let v = data(); // 4 vectors, dim 3
-        let one = AsQuantizer(Pipeline::new(vec![Box::new(IntRound)]));
+        let one = AsQuantizer(Pipeline::new(3, vec![Box::new(IntRound)]).unwrap());
         let m1 = one.fit(v.view(), None);
         let c1 = one.encode(&m1, v.view());
-        // model: d(4) + len(4) + empty(0) = 8; codes: 4 vectors * 3 bytes = 12.
-        assert_eq!(byte_split(&m1, &c1), (8, 12));
+        // model: len(4) + empty(0) = 4; codes: 4 vectors * 3 bytes = 12.
+        assert_eq!(byte_split(&m1, &c1), (4, 12));
 
-        let two = AsQuantizer(Pipeline::new(vec![Box::new(Center), Box::new(IntRound)]));
+        let two =
+            AsQuantizer(Pipeline::new(3, vec![Box::new(Center), Box::new(IntRound)]).unwrap());
         let m2 = two.fit(v.view(), None);
         let c2 = two.encode(&m2, v.view());
-        // model: d(4) + [len(4)+mean(12)] + [len(4)+empty(0)] = 24; codes unchanged.
-        assert_eq!(byte_split(&m2, &c2), (24, 12));
+        // model: [len(4)+mean(12)] + [len(4)+empty(0)] = 20; codes unchanged.
+        assert_eq!(byte_split(&m2, &c2), (20, 12));
+    }
+
+    #[test]
+    fn dim_mismatch_is_error() {
+        // A stage pinned to dim 4 in a pipeline built for dim 3 is rejected...
+        assert!(Pipeline::new(3, vec![Box::new(FixedDim(4)), Box::new(IntRound)]).is_err());
+        // ...while the matching dim builds fine.
+        assert!(Pipeline::new(4, vec![Box::new(FixedDim(4)), Box::new(IntRound)]).is_ok());
     }
 
     #[test]
     fn fit_and_encode_on_different_sets() {
         let a = data();
         let b = &data() + 10.0; // integer, and b - mean(a) stays integral
-        let codec = AsQuantizer(Pipeline::new(vec![Box::new(Center), Box::new(IntRound)]));
+        let codec =
+            AsQuantizer(Pipeline::new(3, vec![Box::new(Center), Box::new(IntRound)]).unwrap());
 
         let model_a = codec.fit(a.view(), None);
         assert_ne!(model_a, codec.fit(b.view(), None));

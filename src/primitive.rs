@@ -42,6 +42,11 @@ pub trait Primitive: Send + Sync {
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32>;
 
+    /// The input dim this stage was built for, or `None` if dim-generic.
+    fn in_dim(&self) -> Option<usize> {
+        None
+    }
+
     /// Dimensionality the next stage receives, given this stage's input dim.
     fn out_dim(&self, in_dim: usize) -> usize {
         in_dim
