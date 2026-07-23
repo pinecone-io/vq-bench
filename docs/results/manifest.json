@@ -1,4 +1,27 @@
 {
-  "generated": 0,
-  "runs": []
+  "generated": 1782845341,
+  "runs": [
+    {
+      "name": "rotation",
+      "path": "rotation.json",
+      "datasets": [
+        {
+          "dataset": "arxiv-nomic-768-normalized",
+          "n_base": 1344643
+        }
+      ],
+      "timestamp": 1782758232
+    },
+    {
+      "name": "split",
+      "path": "split.json",
+      "datasets": [
+        {
+          "dataset": "arxiv-nomic-768-normalized",
+          "n_base": 1344643
+        }
+      ],
+      "timestamp": 1782763738
+    }
+  ]
 }

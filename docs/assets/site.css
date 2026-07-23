@@ -1,0 +1,67 @@
+/* Shared chrome for vq-bench.com: the top nav (used on every page) and the docs
+   page's layout + markdown typography. The landing page inlines its own about/
+   table/explorer styles so it renders standalone (vqb view); this sheet only
+   needs to cover the nav and the docs page. */
+
+/* Always reserve the scrollbar track so percentage margins don't re-center
+   (and shift the header) between pages of different heights. */
+html{overflow-y:scroll}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;margin-right:20%;
+     color:#222;font-size:16px;padding-bottom:46px}
+
+/* ── top nav ─────────────────────────────────────────────────────────────── */
+#nav{display:flex;align-items:center;gap:24px;padding:15px 2px 13px;margin-bottom:10px;
+     border-bottom:1px solid #ececec;font-size:15.5px}
+#nav a.lnk{color:#666;text-decoration:none;font-weight:500}
+#nav a.lnk:hover{color:#111}
+#nav a.lnk.active{color:#111;font-weight:600}
+#nav .spacer{flex:1 1 auto}
+#nav a.gh{display:inline-flex;align-items:center;gap:6px;color:#666;text-decoration:none;font-weight:500}
+#nav a.gh:hover{color:#111}
+#nav a.gh .ghmark{display:block;width:17px;height:17px}
+
+/* ── brand hero (matches the landing page's header) ─────────────────────── */
+#brand{text-align:center;font-size:30px;font-weight:700;letter-spacing:-0.01em;
+       color:#111;padding:18px 14px 2px;margin:0}
+#tagline{text-align:center;font-size:15.5px;color:#777;padding:0 14px 18px;margin:0}
+
+/* ── footer (fixed, Pinecone in the right corner — matches the landing page) ── */
+#foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:11px 24px;
+      border-top:1px solid #eee;background:#fff;z-index:20}
+#foot a{font-size:17px;color:#555;text-decoration:none}
+#foot a:hover{text-decoration:underline;color:#222}
+
+/* ── docs page: sidebar + rendered markdown ─────────────────────────────── */
+#doclayout{display:flex;gap:28px;align-items:flex-start;max-width:1040px;margin:8px auto 0;padding:0 14px}
+#docnav{flex:0 0 210px;position:sticky;top:14px}
+#docnav ul{list-style:none;margin:0;padding:0}
+#docnav li{margin:0 0 2px}
+#docnav a{display:block;padding:6px 10px;border-radius:6px;color:#555;text-decoration:none;font-size:14px}
+#docnav a:hover{background:#f4f4f6;color:#222}
+#docnav a.active{background:#eef2ff;color:#1f3aa8;font-weight:600}
+#doc{flex:1 1 auto;min-width:0;max-width:760px}
+#doc h1{font-size:27px;font-weight:700;letter-spacing:-0.01em;color:#111;margin:6px 0 14px}
+#doc h2{font-size:20px;font-weight:700;color:#111;margin:30px 0 10px;padding-top:18px;border-top:1px solid #eee}
+#doc h3{font-size:16.5px;font-weight:600;color:#222;margin:20px 0 6px}
+#doc p,#doc li{font-size:16px;line-height:1.6;color:#333}
+#doc a{color:#1f6feb;text-decoration:none}
+#doc a:hover{text-decoration:underline}
+#doc code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;
+          background:#f2f2f4;color:#333;padding:1.5px 5px;border-radius:4px}
+#doc pre{background:#f6f8fa;border:1px solid #eaecef;border-radius:8px;padding:14px 16px;
+         overflow-x:auto;line-height:1.5}
+#doc pre code{background:none;padding:0;font-size:13.5px;color:#24292e}
+/* Don't dress CLI subcommands (e.g. `eval`) as language keywords — highlight.js
+   tags shell built-ins hljs-built_in; render them like ordinary code text. */
+#doc pre code .hljs-built_in{color:inherit}
+#doc table{border-collapse:collapse;font-size:14.5px;margin:12px 0;display:block;overflow-x:auto}
+#doc th,#doc td{padding:6px 12px;border:1px solid #e6e6e6;text-align:left}
+#doc th{background:#f4f4f6;font-weight:600}
+#doc blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #d6d9de;color:#666}
+#doc ul,#doc ol{padding-left:22px}
+#docmsg{color:#888;font-size:14px;padding:12px 2px}
+
+@media (max-width:760px){
+  #doclayout{flex-direction:column}
+  #docnav{position:static;flex-basis:auto;width:100%}
+}
