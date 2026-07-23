@@ -1,51 +1,76 @@
-//! Affine conditioners that map `x ↦ scale·x + offset`.
+//! MINMAX: rescales each vector's [min, max] into [lo, hi]
+//! -
+//! Model: empty
+//! Code for vector x: (scale, offset) mapping [min, max] onto [lo, hi]
+//! Apply: x --> scale * x + offset
+//! Reconstruct: y --> (y - offset) / scale
+//! Score: s --> s / scale - (offset / scale) * sum(q)
 
 use ndarray::{Array1, Array2, ArrayView2, Axis, Zip};
 
-use crate::{coding, math, Primitive};
+use crate::coding::CodeLayout;
+use crate::{math, Primitive};
 
-/// Rescale each vector's `[min, max]` into `[lo, hi]`; `(scale, offset)` per
-/// vector are emitted as side info. No model. A constant vector gets `scale = 0`
-/// (its value is unrecoverable and reconstructs to `lo`).
 pub struct MinMax {
     lo: f32,
     hi: f32,
 }
 
 impl MinMax {
-    /// Map into the given target range.
     pub fn new(lo: f32, hi: f32) -> Self {
         Self { lo, hi }
     }
 }
 
 impl Default for MinMax {
-    /// The unit interval `[0, 1]`.
     fn default() -> Self {
         Self::new(0.0, 1.0)
     }
 }
 
-/// The per-vector `(scale, offset)` columns carried in the codes.
+/// The code layout: two trailing scalars (scale, offset), no bit levels.
+fn layout() -> CodeLayout {
+    CodeLayout::new().scalars(2)
+}
+
+/// The per-vector (scales, offsets) carried in the codes.
 fn params(codes: &[&[u8]]) -> (Array1<f32>, Array1<f32>) {
-    let [scale, offset] = coding::unpack_f32_fields(codes);
-    (scale, offset)
+    let (_, [scales, offsets]) = layout().unpack::<2>(codes);
+    (scales, offsets)
+}
+
+/// The inverse affine `(inv, bias)` from the codes: inverts `x' = scale*x + offset`
+/// as `x = inv*x' + bias`; a flat vector (scale 0) recovers to lo (= offset).
+fn inverse_affine(codes: &[&[u8]]) -> (Array1<f32>, Array1<f32>) {
+    let (scales, offsets) = params(codes);
+    let inv = math::reciprocal(scales.view());
+    let bias = Zip::from(&scales)
+        .and(&offsets)
+        .map_collect(|&scale, &offset| if scale != 0.0 { -offset / scale } else { offset });
+    (inv, bias)
 }
 
 impl Primitive for MinMax {
-    // fit uses the trait default (no model); the per-vector (scale, offset) lives in the codes.
-
     fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        let (mins, maxs) = math::row_minmax(vectors);
-        let span = self.hi - self.lo;
-        let scale = (&maxs - &mins).mapv(|range| if range > 0.0 { span / range } else { 0.0 });
-        let offset = (&mins * &scale).mapv(|ms| self.lo - ms); // lo − min·scale (= lo when scale=0)
-        coding::pack_f32_fields([&scale, &offset])
+        let (min, max) = math::row_minmax(vectors);
+        // scale maps [min, max] onto [lo, hi]; a flat vector (span 0) gets scale 0,
+        // and then offset falls out to lo.
+        let scales = (&max - &min).mapv(|span| {
+            if span != 0.0 {
+                (self.hi - self.lo) / span
+            } else {
+                0.0
+            }
+        });
+        let offsets = Zip::from(&scales)
+            .and(&min)
+            .map_collect(|&scale, &min| self.lo - scale * min);
+        layout().pack_scalars(&[scales.view(), offsets.view()])
     }
 
     fn apply(&self, _model: &[u8], vectors: &mut Array2<f32>, codes: &[&[u8]]) {
-        let (scale, offset) = params(codes);
-        math::affine_rows(vectors, &scale, &offset);
+        let (scales, offsets) = params(codes);
+        math::affine_rows(vectors, scales.view(), offsets.view());
     }
 
     fn reconstruct(
@@ -54,14 +79,9 @@ impl Primitive for MinMax {
         codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        // Invert: x = x'/scale − offset/scale. Constant vectors (scale=0) recover lo.
         let mut out = child_recons.expect("MinMax is not terminal").to_owned();
-        let (scale, offset) = params(codes);
-        let inv = scale.mapv(|s| if s != 0.0 { 1.0 / s } else { 0.0 });
-        let bias = Zip::from(&scale)
-            .and(&offset)
-            .map_collect(|&s, &o| if s != 0.0 { -o / s } else { o }); // o = lo when degenerate
-        math::affine_rows(&mut out, &inv, &bias);
+        let (inv, bias) = inverse_affine(codes);
+        math::affine_rows(&mut out, inv.view(), bias.view());
         out
     }
 
@@ -72,29 +92,24 @@ impl Primitive for MinMax {
         codes: &[&[u8]],
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        // ⟨q, x⟩ = inv·⟨q, x'⟩ − (offset/scale)·Σq, per candidate (constant → offset·Σq).
         let mut out = child_scores.expect("MinMax is not terminal").to_owned();
-        let (scale, offset) = params(codes);
-        let inv = scale.mapv(|s| if s != 0.0 { 1.0 / s } else { 0.0 });
-        let off_inv = Zip::from(&scale)
-            .and(&offset)
-            .map_collect(|&s, &o| if s != 0.0 { o / s } else { -o });
+        // <q, x> = inv*<q, x'> + bias*sum(q), the same inverse affine as reconstruct.
+        let (inv, bias) = inverse_affine(codes);
         let sum_q = queries.sum_axis(Axis(1));
-        math::scale_cols(&mut out, &inv);
-        out -= &math::outer(&sum_q, &off_inv);
+        math::scale_cols(&mut out, inv.view());
+        out += &math::outer(sum_q.view(), bias.view());
         out
     }
 
     fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
-        Some(8)
+        Some(layout().byte_len())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::testing::{assert_close, refs};
-    use crate::{AsQuantizer, Pipeline, Quantizer};
+    use crate::util::testing::{assert_close, assert_pipeline_scores, refs};
     use ndarray::array;
 
     // Transform a copy and hand it back as the (identity) child reconstruction.
@@ -127,7 +142,7 @@ mod tests {
         let mm = MinMax::default();
         let codes = mm.encode(&[], v.view());
         let r = refs(&codes);
-        let child = q.dot(&applied(&mm, &v, &r).t()); // ⟨q, x'⟩
+        let child = q.dot(&applied(&mm, &v, &r).t()); // <q, x'>
         assert_close(
             &mm.score(&[], q.view(), &r, Some(child.view())),
             &q.dot(&v.t()),
@@ -140,33 +155,27 @@ mod tests {
         let v = array![[2., 2., 2.]];
         let mm = MinMax::new(0.0, 1.0);
         let codes = mm.encode(&[], v.view());
-        assert_eq!(coding::read_f32s(&codes[0]), vec![0.0, 0.0]); // scale 0, offset = lo
+        let (_, [scales, offsets]) = layout().unpack::<2>(&refs(&codes));
+        assert_eq!((scales[0], offsets[0]), (0.0, 0.0)); // scale 0, offset = lo
         let xp = applied(&mm, &v, &refs(&codes));
         assert_eq!(xp, array![[0., 0., 0.]]); // collapses to lo; value lost
     }
 
     #[test]
     fn composes_with_cast() {
+        // Bin-center reconstruction within a half-bin, exact asymmetric score -- the
+        // tight invariant the conditioner corrections enforce.
         let v = array![[0., 1., 2., 3.], [4., 6., 8., 10.]];
         let q = array![[1., 0., -1., 2.], [0.5, 1., 0., 0.]];
-        let codec = AsQuantizer(
-            Pipeline::new(
-                4,
-                vec![
-                    Box::new(MinMax::default()) as Box<dyn Primitive>,
-                    Box::new(crate::CastUint::new(4)),
-                ],
-            )
-            .unwrap(),
+        assert_pipeline_scores(
+            vec![
+                Box::new(MinMax::default()) as Box<dyn Primitive>,
+                Box::new(crate::CastUint::new(4)),
+            ],
+            v.view(),
+            q.view(),
+            Some(0.4),
+            1e-4,
         );
-        let model = codec.fit(v.view(), None);
-        let codes = codec.encode(&model, v.view());
-        let r = refs(&codes);
-        let recon = codec.reconstruct(&model, &r);
-        // Bin-center reconstruction is within a half-bin (scaled by each row's range).
-        assert_close(&recon, &v, 0.4);
-        // The asymmetric score must equal the exact dot with the pipeline's own
-        // reconstruction — the tight invariant the conditioner corrections enforce.
-        assert_close(&codec.score(&model, q.view(), &r), &q.dot(&recon.t()), 1e-4);
     }
 }

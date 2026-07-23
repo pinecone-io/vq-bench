@@ -1,8 +1,9 @@
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
-use anyhow::Result;
+use anyhow::{ensure, Result};
 
 use super::catalog::{get, QuantizerSpec};
+use crate::coding::CodeLayout;
 use crate::{CastUint, MinMax, Pipeline};
 
 /// The `minmax` family. `get` type-checks `b` (inferred as `u8` from `minmax`);
@@ -11,7 +12,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     key: "minmax",
     family: "MinMax",
     params: &["b"],
-    describe: "MinMax → CastUint(b): per-vector rescale to [0,1], then a b-bit uniform lattice",
+    describe: "MinMax -> CastUint(b)",
     build: |p, _seed, dim| minmax(get(p, "b")?, dim),
 };
 
@@ -19,6 +20,11 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
 /// (`MinMax`, feeding `CastUint` its expected input range), then a `bits`-bit
 /// uniform lattice (`CastUint`; `bits` is config key `b`).
 pub fn minmax(bits: u8, dim: usize) -> Result<Pipeline> {
+    ensure!(
+        (1..=CodeLayout::MAX_BITS).contains(&bits),
+        "b must be in 1..={}, got {bits}",
+        CodeLayout::MAX_BITS
+    );
     Pipeline::new(
         dim,
         vec![Box::new(MinMax::default()), Box::new(CastUint::new(bits))],
@@ -33,6 +39,15 @@ mod tests {
 
     fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
         codes.iter().map(Vec::as_slice).collect()
+    }
+
+    /// `b` out of `1..=8` is a build error (surfaced by `RunConfig::validate`).
+    #[test]
+    fn rejects_out_of_range_bits() {
+        assert!(minmax(0, 3).is_err());
+        assert!(minmax(9, 3).is_err());
+        assert!(minmax(1, 3).is_ok());
+        assert!(minmax(8, 3).is_ok());
     }
 
     /// 8-bit round-trip recovers the input within one lattice step, and `score`

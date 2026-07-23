@@ -16,7 +16,7 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
         (
             "rounders",
             &[
-                ("cast(uint)", "round [0,1] into 2^b uniform bins, reconstructing to bin centers (1-8 bits)"),
+                ("cast(uint)", "round [0,1] into 2^b uniform bins, reconstructing to bin centers"),
             ],
         ),
     ]

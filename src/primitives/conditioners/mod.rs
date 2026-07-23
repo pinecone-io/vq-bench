@@ -1,5 +1,3 @@
-//! Conditioners: affine/orthogonal transforms that pass a residual downstream.
-
 mod absmax;
 mod minmax;
 mod random_rotate;

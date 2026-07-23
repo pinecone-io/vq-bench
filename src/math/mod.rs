@@ -7,6 +7,8 @@ mod batch;
 mod linalg;
 mod rng;
 
-pub use batch::{affine_rows, outer, row_minmax, scale_cols};
-pub use linalg::{matmul, qr_q};
-pub use rng::{gaussian, seed};
+pub use batch::{
+    affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
+};
+pub use linalg::matmul;
+pub use rng::{random_orthogonal, seed};

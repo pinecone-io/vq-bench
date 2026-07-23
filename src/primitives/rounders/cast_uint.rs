@@ -1,23 +1,26 @@
-//! `cast(uint, b)`: round `[0, 1]` input into a `b`-bit uniform lattice.
+//! CAST(UINT, b): rounds [0, 1] input into a b-bit uniform lattice of N = 2^b bins
+//! -
+//! Model: input dim d
+//! Code for vector x: b-bit bin index per coordinate, bin q = floor(x * N)
+//! Apply: x --> x - center(q)              (residual for the next stage)
+//! Reconstruct: y --> center(q) + y
+//! Score: s --> (<q, c> + 0.5 * sum(q)) / N + s   (from the bin indices c, not values)
+//!
+//! Bin q covers [q/N, (q+1)/N) and decodes to its center (q + 0.5)/N.
 
-use ndarray::{Array2, ArrayView2};
+use ndarray::{Array2, ArrayView2, Axis};
 
-use super::cast_common::{checked_dim, dim_bytes, stored_dim, MAX_BITS};
+use crate::coding::CodeLayout;
 use crate::{coding, math, Primitive};
 
-/// Quantize `[0, 1]` input into `2^bits` uniform bins, reconstructing each to its
-/// **bin center**: bin `q` covers `[q/N, (q+1)/N)` and decodes to `(q+0.5)/N`
-/// (`N = 2^bits`). E.g. `bits=2`: bins split at `1/4, 1/2, 3/4`, centers
-/// `1/8, 3/8, 5/8, 7/8`. The model stores only the input dim `d` (so a terminal
-/// `reconstruct` knows how many values a packed code holds).
 pub struct CastUint {
     bits: u8,
 }
 
 impl CastUint {
-    /// Cast to `bits`-bit unsigned (`1..=8`).
+    /// Cast to `bits`-bit unsigned; the valid range (`1..=CodeLayout::MAX_BITS`) is
+    /// enforced by the quantizer builder.
     pub fn new(bits: u8) -> Self {
-        debug_assert!((1..=MAX_BITS).contains(&bits));
         Self { bits }
     }
 
@@ -26,40 +29,34 @@ impl CastUint {
         1u32 << self.bits
     }
 
-    /// Decode `n` codes of `d` values to their bin centers in `[0, 1]`.
+    /// The code layout: `d` levels of `self.bits` bits, no scalars.
+    fn layout(&self, d: usize) -> CodeLayout {
+        CodeLayout::new().bits(d, self.bits)
+    }
+
+    /// Decode `n` codes of `d` values to their bin centers `(bin + 0.5)/N` in `[0, 1]`.
     fn decode(&self, codes: &[&[u8]], d: usize) -> Array2<f32> {
-        let n = self.bins() as f32;
-        coding::unpack_codes(codes, d, self.bits).mapv(|q| (q as f32 + 0.5) / n)
+        let inv_bins = 1.0 / self.bins() as f32;
+        let (levels, []) = self.layout(d).unpack::<0>(codes);
+        levels.mapv(|bin| (bin as f32 + 0.5) * inv_bins)
     }
 }
 
 impl Primitive for CastUint {
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        dim_bytes(vectors.ncols())
+        coding::pack_model(vectors.ncols())
     }
 
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        let d = checked_dim(model, vectors.ncols());
-        let n = self.bins();
-        let nf = n as f32;
-        // Stream row by row: bin index ⌊x·N⌋ (x=1.0 folds into the top bin) into a
-        // reused buffer, packed straight to that vector's code — no (n×d) intermediate.
-        let mut levels = vec![0u32; d];
-        vectors
-            .rows()
-            .into_iter()
-            .map(|row| {
-                for (q, &x) in levels.iter_mut().zip(row) {
-                    *q = ((x.clamp(0.0, 1.0) * nf) as u32).min(n - 1);
-                }
-                coding::pack_bits(&levels, self.bits)
-            })
-            .collect()
+    fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
+        let bins = self.bins();
+        let bins_f = bins as f32;
+        // Bin index floor(x * N) per coordinate (x = 1.0 folds into the top bin).
+        let levels = vectors.mapv(|x| ((x.clamp(0.0, 1.0) * bins_f) as u32).min(bins - 1));
+        self.layout(vectors.ncols()).pack(levels.view(), &[])
     }
 
-    fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, codes: &[&[u8]]) {
-        let d = checked_dim(model, vectors.ncols());
-        *vectors -= &self.decode(codes, d); // residual
+    fn apply(&self, _model: &[u8], vectors: &mut Array2<f32>, codes: &[&[u8]]) {
+        *vectors -= &self.decode(codes, vectors.ncols());
     }
 
     fn reconstruct(
@@ -68,10 +65,7 @@ impl Primitive for CastUint {
         codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let d = match child_recons {
-            Some(c) => checked_dim(model, c.ncols()),
-            None => stored_dim(model),
-        };
+        let d = super::code_dim(model, child_recons);
         let mut out = self.decode(codes, d);
         if let Some(child) = child_recons {
             out += &child;
@@ -81,16 +75,20 @@ impl Primitive for CastUint {
 
     fn score(
         &self,
-        model: &[u8],
+        _model: &[u8],
         queries: ArrayView2<f32>,
         codes: &[&[u8]],
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        // Dot continuous queries against each candidate's OWN decoded lattice code
-        // (not a pipeline reconstruct).
-        let d = checked_dim(model, queries.ncols());
-        let cand = self.decode(codes, d);
-        let mut out = math::matmul(queries, cand.t());
+        // Score straight from the integer bin indices
+        // <q, center(c)> = (<q, c> + 0.5 * sum(q)) / N.
+        let d = queries.ncols();
+        let inv_bins = 1.0 / self.bins() as f32;
+        let (levels, []) = self.layout(d).unpack::<0>(codes);
+        let levels = levels.mapv(|bin| bin as f32);
+        let mut out = math::matmul(queries, levels.t()); // <q, c>
+        math::offset_rows(&mut out, queries.sum_axis(Axis(1)).mapv(|sum| 0.5 * sum).view()); // + 0.5 * sum(q)
+        out *= inv_bins; // / N
         if let Some(child) = child_scores {
             out += &child;
         }
@@ -98,7 +96,7 @@ impl Primitive for CastUint {
     }
 
     fn code_bytes(&self, in_dim: usize) -> Option<usize> {
-        Some((in_dim * self.bits as usize).div_ceil(8))
+        Some(self.layout(in_dim).byte_len())
     }
 }
 
@@ -114,7 +112,7 @@ mod tests {
         let cast = CastUint::new(8);
         let model = cast.fit(v.view(), None);
         let codes = cast.encode(&model, v.view());
-        // Max error is a half-bin = 1/(2·2^8) = 1/512.
+        // Max error is a half-bin = 1/(2*2^8) = 1/512.
         assert_close(
             &cast.reconstruct(&model, &refs(&codes), None),
             &v,
@@ -124,7 +122,7 @@ mod tests {
 
     #[test]
     fn exact_at_bin_centers() {
-        // Bin centers for bits=2 (N=4): 1/8, 3/8, 5/8, 7/8 — reconstruct exactly.
+        // Bin centers for bits=2 (N=4): 1/8, 3/8, 5/8, 7/8 -- reconstruct exactly.
         let v = array![
             [1. / 8., 3. / 8., 5. / 8., 7. / 8.],
             [7. / 8., 1. / 8., 3. / 8., 5. / 8.]
@@ -169,7 +167,7 @@ mod tests {
         );
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
-        // per vector: minmax 8 bytes + cast ceil(4*2/8)=1 = 9; ×2 = 18.
+        // per vector: minmax 8 bytes + cast ceil(4*2/8)=1 = 9; x2 = 18.
         assert_eq!(byte_split(&model, &codes).1, 18);
     }
 }
