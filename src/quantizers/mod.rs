@@ -17,7 +17,7 @@ macro_rules! quantizers {
     };
 }
 
-quantizers! { minmax }
+quantizers! { minmax, scalar }
 
 /// A named [`Pipeline`], runnable through the [`Quantizer`] interface. `name` is
 /// the display **family name** (e.g. `MinMax`); the runner forms a **method name**

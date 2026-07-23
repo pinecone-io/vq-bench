@@ -9,7 +9,11 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
             "conditioners",
             &[
                 ("minmax", "affine scale each vector into desired target range"),
+                ("minmax_dim", "affine scale each dimension into the target range, calibrated over the fit set"),
                 ("absmax", "scale each vector into [-1,1] by dividing by max absolute value"),
+                ("normalize", "scale each vector to unit L2 norm"),
+                ("center", "subtract the mean over the fit set from every vector"),
+                ("scale", "apply a fixed affine scaling to every vector"),
                 ("random_rotate", "apply a random orthogonal transformation to all vectors"),
             ],
         ),

@@ -17,7 +17,10 @@ pub(crate) use util::coding;
 pub use math::matmul;
 pub use pipeline::Pipeline;
 pub use primitive::Primitive;
-pub use primitives::{catalog as primitive_catalog, AbsMax, CastUint, MinMax, RandomRotate};
+pub use primitives::{
+    catalog as primitive_catalog, AbsMax, CastUint, Center, MinMax, MinMaxDim, Normalize,
+    RandomRotate, Scale,
+};
 pub use quantizer::{byte_split, AsQuantizer, Quantizer};
 pub use quantizers::{catalog, NamedQuantizer};
 pub use splitter::Splitter;

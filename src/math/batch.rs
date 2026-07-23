@@ -3,12 +3,19 @@
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, Zip};
 
-/// Per-row minimum and maximum of an `(n × d)` batch.
+/// Per-row minimum and maximum of an `(n × d)` batch, in a single pass.
 pub fn row_minmax(x: ArrayView2<f32>) -> (Array1<f32>, Array1<f32>) {
-    let mins = x.map_axis(Axis(1), |r| r.iter().copied().fold(f32::INFINITY, f32::min));
-    let maxs = x.map_axis(Axis(1), |r| {
-        r.iter().copied().fold(f32::NEG_INFINITY, f32::max)
-    });
+    let mut mins = Array1::from_elem(x.nrows(), f32::INFINITY);
+    let mut maxs = Array1::from_elem(x.nrows(), f32::NEG_INFINITY);
+    Zip::from(x.rows())
+        .and(&mut mins)
+        .and(&mut maxs)
+        .for_each(|row, mn, mx| {
+            for &v in row {
+                *mn = mn.min(v);
+                *mx = mx.max(v);
+            }
+        });
     (mins, maxs)
 }
 
@@ -25,6 +32,17 @@ pub fn affine_rows(x: &mut Array2<f32>, scale: ArrayView1<f32>, offset: ArrayVie
         .for_each(|mut row, &s, &o| {
             row.mapv_inplace(|v| s * v + o);
         });
+}
+
+/// In place per-column affine: `x[:, j] = scale[j]·x[:, j] + offset[j]`. Traversed
+/// row-major (the storage order), each row taking the same `scale`/`offset`.
+pub fn affine_cols(x: &mut Array2<f32>, scale: ArrayView1<f32>, offset: ArrayView1<f32>) {
+    Zip::from(x.rows_mut()).for_each(|mut row| {
+        Zip::from(&mut row)
+            .and(scale)
+            .and(offset)
+            .for_each(|v, &s, &o| *v = s * *v + o);
+    });
 }
 
 /// In place per-row scaling: `x[i] *= scale[i]`.
@@ -79,6 +97,13 @@ mod tests {
         let mut x = array![[1., 2.], [3., 4.]];
         affine_rows(&mut x, array![2., 0.5].view(), array![1., -1.].view());
         assert_eq!(x, array![[3., 5.], [0.5, 1.]]);
+    }
+
+    #[test]
+    fn affine_cols_scales_each_column() {
+        let mut x = array![[1., 2.], [3., 4.]];
+        affine_cols(&mut x, array![2., 0.5].view(), array![1., -1.].view());
+        assert_eq!(x, array![[3., 0.], [7., 1.]]);
     }
 
     #[test]

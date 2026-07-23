@@ -8,7 +8,7 @@ mod linalg;
 mod rng;
 
 pub use batch::{
-    affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
+    affine_cols, affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
 };
 pub use linalg::matmul;
 pub use rng::{random_orthogonal, seed};
