@@ -61,7 +61,14 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;marg
 #doc ul,#doc ol{padding-left:22px}
 #docmsg{color:#888;font-size:14px;padding:12px 2px}
 
+/* Narrow screens: the 20% gutters above would spend 40% of a phone's width on
+   empty margin, so hand it all back to the content. */
+@media (max-width:900px){
+  body{margin-left:0;margin-right:0}
+}
 @media (max-width:760px){
-  #doclayout{flex-direction:column}
+  /* align-items:flex-start above shrink-wraps the children once this is a column,
+     so #doc would size to its max-content and hang off the right edge. */
+  #doclayout{flex-direction:column;align-items:stretch}
   #docnav{position:static;flex-basis:auto;width:100%}
 }

@@ -1,4 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><title>VQ-bench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,11 +52,6 @@
   .legrow.off .lbl{color:#b3b3b3}
   .legrow.off svg{opacity:0.32}
   .hint{font:12px system-ui;color:#666;padding:8px 14px 10px}
-  @media (max-width:760px){
-    #plotwrap{flex-direction:column}
-    #fig{height:440px}
-    #legendpanel{flex-basis:auto;width:100%;height:auto;max-height:220px}
-  }
   /* table tab */
   #tab-table{padding:8px 14px 18px}
   #tbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
@@ -100,6 +96,10 @@
   #about details[open] summary{color:#111}
   #about details[open] summary::before{transform:rotate(90deg)}
   #about details > *:not(summary){margin:0 0 12px 24px}
+  /* A table's width:100% resolves against the details content box, which does not
+     account for the 24px indent above — plain 100% would hang past the right edge
+     at every width (invisible on desktop only because the body gutters absorb it). */
+  #about details > table.info{width:calc(100% - 24px)}
   .note{font-size:13px;color:#888;margin-top:8px}
   /* section below the plots (References dropdown) + info tables — left-aligned text tables */
   #below{padding:14px 14px 24px;max-width:960px}
@@ -122,6 +122,36 @@
         border-top:1px solid #eee;background:#fff;z-index:20}
   #foot a{font-size:17px;color:#555;text-decoration:none}
   #foot a:hover{text-decoration:underline;color:#222}
+
+  /* ── narrow screens ───────────────────────────────────────────────────────
+     Kept last on purpose: a media query adds no specificity, so these only beat
+     the equally-specific base rules above by coming later in source order. */
+  /* The 20% gutters would spend 40% of a phone's width on empty margin. */
+  @media (max-width:900px){
+    body{margin-left:0;margin-right:0}
+  }
+  @media (max-width:760px){
+    #plotwrap{flex-direction:column}
+    #fig{height:440px}
+    #legendpanel{flex-basis:auto;width:100%;height:auto;max-height:220px}
+    /* The results table is all nowrap cells, so it's wider than a phone. Scroll it
+       on its own rather than letting it drag the whole page sideways. Only at this
+       width: overflow-x also makes the wrapper a vertical scroll container, which
+       would strand the sticky `th` against a box that never scrolls. */
+    .tscroll{overflow-x:auto}
+    #tbar{flex-wrap:wrap}
+    #tq{width:auto;flex:1 1 140px;min-width:0}
+    #colpop{max-width:calc(100vw - 40px)}
+    /* A <select> sizes itself to its longest option ("SOS@k (score ratio)"), which
+       alone is wider than a phone. Let it shrink and ellipsize instead. */
+    #top .ctl,#bar .ctl{max-width:100%}
+    #top select,#bar select{max-width:100%;min-width:0}
+    /* Long quantizer names don't fit a pinned 26% column at this width. */
+    table.info.wide-first th:first-child,table.info.wide-first td:first-child{width:auto;white-space:normal}
+    /* Safety valve: these hold prose and so mostly reflow, but a long unbreakable
+       cell (a paper title, a wide number) would otherwise widen the whole page. */
+    table.info{display:block;overflow-x:auto}
+  }
 </style></head><body>
 <!-- Single-run data is injected into the block below by `vqb view`; on the
      committed site the placeholder stays put, JSON.parse fails, and we go global. -->
@@ -229,7 +259,7 @@
       <div id="colpop" hidden><div id="collist"></div></div>
     </div>
   </div>
-  <table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table>
+  <div class="tscroll"><table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table></div>
 </section>
 
 <footer id="foot"><a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a></footer>
@@ -461,12 +491,21 @@ function axisTitle(field, k, t){
   return s;
 }
 
+// The chart's type scale is drawn for a wide desktop figure; at phone widths the
+// axis titles, ticks and left margin would swallow the plot area. Plotly's
+// responsive:true resizes the canvas but never rescales type, so we do it here.
+// Breakpoint matches the CSS above, which stacks the legend below the plot.
+const narrow = () => window.innerWidth <= 760;
+
 function axisLayout(vals, field, log, label){
+  const sm = narrow();
   const ax = {
-    title:{text:(label ?? FIELDS[field].label) + (log?" (log)":""), font:{size:26, weight:700, color:"#111"}, standoff:18},
+    title:{text:(label ?? FIELDS[field].label) + (log?" (log)":""),
+           font:{size:sm?14:26, weight:700, color:"#111"}, standoff:sm?6:18},
     showgrid:true, gridcolor:"#e2e2e2", zeroline:false, autorange:false,
-    showline:true, linecolor:"#222", linewidth:2.6, mirror:true,
-    ticks:"outside", tickcolor:"#222", ticklen:8, tickwidth:2, tickfont:{size:21, weight:600, color:"#222"},
+    showline:true, linecolor:"#222", linewidth:sm?1.4:2.6, mirror:true,
+    ticks:"outside", tickcolor:"#222", ticklen:sm?4:8, tickwidth:sm?1:2,
+    tickfont:{size:sm?11:21, weight:600, color:"#222"},
     // Reserve room for whatever tick labels the current zoom produces, so long
     // labels never clip or collide with the axis title (Plotly keeps them at a
     // distinct precision; we don't cap it, which would make ticks all-identical).
@@ -555,15 +594,18 @@ function redraw(){
 
   // The series legend lives in the HTML panel (#legendpanel), not in Plotly — robust at
   // any width and gives obvious per-series checkboxes. So the chart itself draws no legend.
+  const sm = narrow();
   const layout = {
-    font:{family:"'Helvetica Neue',Helvetica,Arial,sans-serif", size:21, color:"#222"},
+    font:{family:"'Helvetica Neue',Helvetica,Arial,sans-serif", size:sm?11:21, color:"#222"},
     hovermode:"closest", showlegend:false,
-    margin:{l:96,r:24,t:20,b:80}, plot_bgcolor:"white", paper_bgcolor:"white",
+    margin: sm ? {l:48,r:10,t:8,b:44} : {l:96,r:24,t:20,b:80},
+    plot_bgcolor:"white", paper_bgcolor:"white",
     xaxis: axisLayout(xs,xf,xlog,axisTitle(xf,k,t)), yaxis: axisLayout(ys,yf,ylog,axisTitle(yf,k,t)), shapes,
   };
   curFname = `vq-bench-${yf}-vs-${xf}`;
   Plotly.react("fig", traces, layout, {
-    responsive:true, displaylogo:false, displayModeBar:"hover",
+    // "hover" never fires on touch, so the modebar would be unreachable on a phone.
+    responsive:true, displaylogo:false, displayModeBar: sm ? true : "hover",
     modeBarButtonsToRemove:["toImage","select2d","lasso2d","resetScale2d"],   // downloads + reset live elsewhere; autoscale is our own toggle
   });
   bindAutoscaleSync();
@@ -988,6 +1030,16 @@ document.getElementById("btn-link").onclick = async ()=>{
   catch { btn.textContent = "copy failed"; }
   setTimeout(()=>{ btn.textContent = orig; }, 1400);
 };
+// Re-render only when a resize/rotation crosses the narrow breakpoint, since that's
+// the one thing Plotly's own responsive handling won't pick up (it rescales the
+// canvas, not the type). Same-side resizes are left to Plotly.
+let wasNarrow = narrow();
+window.addEventListener("resize", ()=>{
+  if(narrow() === wasNarrow) return;
+  wasNarrow = narrow();
+  if(DATA) redraw();
+});
+
 const fig = document.getElementById("fig");
 fig.addEventListener("dragover", e=>{ e.preventDefault(); fig.classList.add("drag"); });
 fig.addEventListener("dragleave", ()=> fig.classList.remove("drag"));
