@@ -18,8 +18,9 @@ pub use math::matmul;
 pub use pipeline::Pipeline;
 pub use primitive::Primitive;
 pub use primitives::{
-    catalog as primitive_catalog, AbsMax, CastAngular, CastNormal, CastUint, Center, MinMax,
-    MinMaxDim, Normalize, NormalScale, RandomHadamard, RandomRotate, Scale,
+    catalog as primitive_catalog, AbsMax, CastAngular, CastHamming, CastNormal, CastSign, CastUint,
+    Center, MinMax, MinMaxDim, Normalize, NormalScale, OptimizeSigns, RandomHadamard, RandomRotate,
+    Scale,
 };
 pub use quantizer::{byte_split, AsQuantizer, Quantizer};
 pub use quantizers::{catalog, NamedQuantizer};

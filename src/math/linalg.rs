@@ -1,7 +1,7 @@
 //! faer-backed linear algebra over ndarray matrices.
 
 use faer::{Mat, MatRef};
-use ndarray::{Array2, ArrayView2};
+use ndarray::{Array1, Array2, ArrayView2};
 
 /// Borrow a contiguous row-major slice as a faer matrix view.
 fn as_faer(data: &[f32], nrows: usize, ncols: usize) -> MatRef<'_, f32> {
@@ -29,6 +29,26 @@ pub fn qr_q(a: ArrayView2<f32>) -> Array2<f32> {
     let fa = as_faer(a.as_slice().unwrap(), a.nrows(), a.ncols());
     let q = fa.qr().compute_Q();
     from_faer(q.as_ref())
+}
+
+/// Thin SVD `a = U * diag(s) * V^T`. Returns `(U, s, V^T)` with `U` (m x k),
+/// `s` (k, descending), `V^T` (k x n), `k = min(m, n)`.
+pub fn svd(a: ArrayView2<f32>) -> (Array2<f32>, Array1<f32>, Array2<f32>) {
+    let a = a.as_standard_layout();
+    let fa = as_faer(a.as_slice().unwrap(), a.nrows(), a.ncols());
+    let svd = fa.thin_svd().expect("SVD failed to converge");
+    let u = from_faer(svd.U());
+    let vt = from_faer(svd.V().transpose());
+    let s_diag = svd.S();
+    let s = Array1::from_shape_fn(s_diag.dim(), |i| s_diag[i]);
+    (u, s, vt)
+}
+
+/// Nearest orthogonal matrix to `cross` (orthogonal Procrustes): `U * V^T` from
+/// `svd(cross)`, i.e. `argmax_R tr(R^T * cross)` over orthogonal R.
+pub fn orthogonal_procrustes(cross: ArrayView2<f32>) -> Array2<f32> {
+    let (u, _, vt) = svd(cross);
+    matmul(u.view(), vt.view())
 }
 
 #[cfg(test)]

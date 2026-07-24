@@ -12,9 +12,13 @@ fn code_dim(model: &[u8], child: Option<ArrayView2<f32>>) -> usize {
 }
 
 mod cast_angular;
+mod cast_hamming;
 mod cast_normal;
+mod cast_sign;
 mod cast_uint;
 
 pub use cast_angular::CastAngular;
+pub use cast_hamming::CastHamming;
 pub use cast_normal::{CastNormal, NormalScale};
+pub use cast_sign::CastSign;
 pub use cast_uint::CastUint;

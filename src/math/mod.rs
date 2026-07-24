@@ -11,7 +11,7 @@ mod transforms;
 pub use batch::{
     affine_cols, affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
 };
-pub use linalg::matmul;
+pub use linalg::{matmul, orthogonal_procrustes};
 pub use rng::{rademacher, random_orthogonal, seed};
 pub use transforms::{hadamard, kac_walk};
 

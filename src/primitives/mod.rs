@@ -7,6 +7,7 @@ mod conditioners;
 mod rounders;
 
 pub use conditioners::{
-    AbsMax, Center, MinMax, MinMaxDim, Normalize, RandomHadamard, RandomRotate, Scale,
+    AbsMax, Center, MinMax, MinMaxDim, Normalize, OptimizeSigns, RandomHadamard, RandomRotate,
+    Scale,
 };
-pub use rounders::{CastAngular, CastNormal, CastUint, NormalScale};
+pub use rounders::{CastAngular, CastHamming, CastNormal, CastSign, CastUint, NormalScale};

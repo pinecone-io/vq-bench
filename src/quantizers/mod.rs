@@ -17,7 +17,7 @@ macro_rules! quantizers {
     };
 }
 
-quantizers! { minmax, scalar, eden_mse, eden_prod, turboquant_mse, rabitq, e_rabitq }
+quantizers! { minmax, scalar, eden_mse, eden_prod, turboquant_mse, rabitq, e_rabitq, qjl, simhash, turboquant_prod, itq, itq_asym }
 
 /// The orthogonal rotation a quantizer applies before rounding: the full dense
 /// Haar-random matrix (`O(d^2)`) or the randomized Hadamard transform (`O(d log d)`).
