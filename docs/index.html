@@ -238,10 +238,9 @@ const COLORS = {
   "EDEN-MSE":"#238b45", "EDEN-prod":"#74c476",
   // TurboQuant family — purples
   "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
-  // ITQ / learned-rotation family — blues
-  "ITQ":"#3182bd", "ITQ-asym":"#6baed6", "OPQ":"#08519c",
+  // product-quantization & learned-rotation family — blues
+  "PQ":"#08306b", "ITQ":"#3182bd", "ITQ-asym":"#6baed6", "OPQ":"#08519c",
   // singletons — distinct hues
-  "PQ":"#000000",      // black
   "SimHash":"#008b8b", // dark teal
   "QJL":"#bcbd22",     // olive
   "NF4":"#8c564b",     // brown
@@ -783,6 +782,8 @@ const REFS = [
   {n:"QJL",             c:"#bcbd22", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
   {n:"ITQ",             c:"#3182bd", y:2013, t:"Iterative Quantization: A Procrustean Approach to Learning Binary Codes for Large-Scale Image Retrieval", u:"https://doi.org/10.1109/TPAMI.2012.193"},
   {n:"ITQ-asym",        c:"#6baed6", y:2014, t:"Asymmetric Distances for Binary Embeddings", u:"https://doi.org/10.1109/TPAMI.2013.101"},
+  {n:"PQ",              c:"#08306b", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
+  {n:"OPQ",             c:"#08519c", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
 ];
 (function renderRefs(){
   const tb = document.getElementById("refbody");

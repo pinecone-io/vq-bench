@@ -15,7 +15,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "E-RaBitQ",
     params: &["b", "rotation"],
     describe: "Center -> Normalize -> Rotate -> CastAngular(b)",
-    build: |p, seed, dim| e_rabitq(get(p, "b")?, get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| e_rabitq(get(p, "b")?, get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `Center -> Normalize -> rotate(seed) -> CastAngular(b)` over input dim `dim`.

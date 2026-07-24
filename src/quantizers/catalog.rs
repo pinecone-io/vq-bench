@@ -128,6 +128,13 @@ impl FromParam for u8 {
     }
 }
 
+impl FromParam for usize {
+    fn from_value(v: &Value) -> Result<usize> {
+        let n = v.as_u64().context("must be a non-negative integer")?;
+        usize::try_from(n).map_err(|_| anyhow!("={n} out of range"))
+    }
+}
+
 impl FromParam for Rotation {
     fn from_value(v: &Value) -> Result<Rotation> {
         match v.as_str().context("must be a string")? {

@@ -12,7 +12,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "SimHash",
     params: &["rotation"],
     describe: "Center -> Normalize -> Rotate -> CastHamming",
-    build: |p, seed, dim| simhash(get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| simhash(get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 pub fn simhash(rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {

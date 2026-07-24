@@ -15,7 +15,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "EDEN-prod",
     params: &["b", "rotation"],
     describe: "Normalize -> Rotate -> CastNormal(b, unbiased)",
-    build: |p, seed, dim| eden_prod(get(p, "b")?, get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| eden_prod(get(p, "b")?, get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `Normalize -> rotate(seed) -> CastNormal(b, Unbiased)` over input dim `dim`.

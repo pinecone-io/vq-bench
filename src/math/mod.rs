@@ -4,6 +4,7 @@
 //! functions and never depend on a backend directly.
 
 mod batch;
+mod cluster;
 mod linalg;
 mod rng;
 mod transforms;
@@ -11,6 +12,7 @@ mod transforms;
 pub use batch::{
     affine_cols, affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
 };
+pub use cluster::{lloyd_kmeans, nearest_centroid};
 pub use linalg::{matmul, orthogonal_procrustes};
 pub use rng::{rademacher, random_orthogonal, seed};
 pub use transforms::{hadamard, kac_walk};

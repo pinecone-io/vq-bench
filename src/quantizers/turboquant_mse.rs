@@ -15,7 +15,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "TurboQuant-MSE",
     params: &["b", "rotation"],
     describe: "Normalize -> Rotate -> CastNormal(b, plain)",
-    build: |p, seed, dim| turboquant_mse(get(p, "b")?, get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| turboquant_mse(get(p, "b")?, get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `Normalize -> rotate(seed) -> CastNormal(b, Plain)` over input dim `dim`.

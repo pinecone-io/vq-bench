@@ -1,10 +1,13 @@
-//! CAST(SIGN): one sign bit per coordinate, scored as the plain asymmetric dot
+//! CAST(SIGN): one sign bit per coordinate, scored as the asymmetric dot scaled by
+//! the QJL constant a = sqrt(pi / 2d) (d = input dim)
 //! -
 //! Model: input dim d
-//! Code for vector x: one sign bit per coordinate (1 iff x_i >= 0), decoded to +-1
-//! Apply: x --> x - sign(x)              (residual for the next stage)
-//! Reconstruct: y --> sign(x) + y
-//! Score: s --> <q, sign(x)> + s
+//! Code for vector x: one sign bit per coordinate (1 iff x_i >= 0), decoded to +-a
+//! Apply: x --> x - a * sign(x)          (residual for the next stage)
+//! Reconstruct: y --> a * sign(x) + y
+//! Score: s --> a * <q, sign(x)> + s
+//! The bare sign sum <q, sign(x)> overshoots the true dot by ~sqrt(d); a shrinks it
+//! back onto that scale. `qjl` and `itq_asym` (both unit-normalized upstream) rely on it.
 
 use ndarray::{Array2, ArrayView2};
 
@@ -21,10 +24,12 @@ fn layout(d: usize) -> CodeLayout {
     CodeLayout::new().bits(d, BITS)
 }
 
-/// Decode packed sign bits to +-1 reals (d values per code).
+/// Decode packed sign bits to +-a reals (d values per code), where a = sqrt(pi/2d) is
+/// the QJL scale that puts the asymmetric sign dot on the true-dot scale.
 fn decode_signs(codes: &[&[u8]], d: usize) -> Array2<f32> {
     let (levels, []) = layout(d).unpack::<0>(codes);
-    levels.mapv(|b| if b == 1 { 1.0 } else { -1.0 })
+    let a = (std::f32::consts::PI / (2.0 * d as f32)).sqrt();
+    levels.mapv(|b| if b == 1 { a } else { -a })
 }
 
 impl Primitive for CastSign {
@@ -80,26 +85,30 @@ mod tests {
     use crate::util::testing::{assert_close, refs};
     use ndarray::array;
 
+    /// d = 4, so the decode scale is a = sqrt(pi/8).
     #[test]
-    fn round_trip_and_score_exact_on_sign_grid() {
+    fn round_trip_and_score_on_scaled_sign_grid() {
         let v = array![[1., -1., 1., 1.], [-1., -1., 1., -1.]];
         let q = array![[1., 0., -1., 2.], [0.5, 1., 0., 0.]];
+        let a = (std::f32::consts::PI / 8.0).sqrt();
         let cast = CastSign;
         let model = cast.fit(v.view(), None);
         let codes = cast.encode(&model, v.view());
         let r = refs(&codes);
-        assert_close(&cast.reconstruct(&model, &r, None), &v, 1e-6);
-        assert_close(&cast.score(&model, q.view(), &r, None), &q.dot(&v.t()), 1e-4);
+        // v is already the +-1 grid, so a * sign(v) == a * v.
+        assert_close(&cast.reconstruct(&model, &r, None), &(a * &v), 1e-6);
+        assert_close(&cast.score(&model, q.view(), &r, None), &(a * &q.dot(&v.t())), 1e-4);
     }
 
     #[test]
     fn encodes_sign_bit_zero_is_positive() {
         let v = array![[0.0, -0.2, 3.0, -5.0]];
+        let a = (std::f32::consts::PI / 8.0).sqrt(); // d = 4
         let cast = CastSign;
         let model = cast.fit(v.view(), None);
         let codes = cast.encode(&model, v.view());
         let recon = cast.reconstruct(&model, &refs(&codes), None);
-        assert_close(&recon, &array![[1., -1., 1., -1.]], 1e-6);
+        assert_close(&recon, &(a * &array![[1., -1., 1., -1.]]), 1e-6);
     }
 
     #[test]
@@ -116,13 +125,15 @@ mod tests {
         use crate::{AsQuantizer, Pipeline, Quantizer};
         let v = array![[2., -2., 2., 2.], [-4., -4., 4., -4.]];
         let q = array![[1., 0., -1., 2.], [0.5, 1., 0., 0.]];
+        let a = (std::f32::consts::PI / 8.0).sqrt(); // d = 4
         let codec = AsQuantizer(
             Pipeline::new(4, vec![Box::new(crate::AbsMax) as Box<dyn Primitive>, Box::new(CastSign)]).unwrap(),
         );
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
         let r = refs(&codes);
-        assert_close(&codec.reconstruct(&model, &r), &v, 1e-5);
-        assert_close(&codec.score(&model, q.view(), &r), &q.dot(&v.t()), 1e-4);
+        // AbsMax rescales the +-a sign grid back onto v's magnitudes, times a.
+        assert_close(&codec.reconstruct(&model, &r), &(a * &v), 1e-5);
+        assert_close(&codec.score(&model, q.view(), &r), &(a * &q.dot(&v.t())), 1e-4);
     }
 }

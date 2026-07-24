@@ -15,7 +15,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "EDEN-MSE",
     params: &["b", "rotation"],
     describe: "Normalize -> Rotate -> CastNormal(b, MSE)",
-    build: |p, seed, dim| eden_mse(get(p, "b")?, get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| eden_mse(get(p, "b")?, get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `Normalize -> rotate(seed) -> CastNormal(b, BiasedMse)` over input dim `dim`.

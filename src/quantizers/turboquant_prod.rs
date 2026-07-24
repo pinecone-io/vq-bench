@@ -18,7 +18,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "TurboQuant-prod",
     params: &["b", "rotation"],
     describe: "Normalize -> Rotate -> CastNormal(b-1, plain) -> QJL",
-    build: |p, seed, dim| turboquant_prod(get(p, "b")?, get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| turboquant_prod(get(p, "b")?, get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `(b-1)`-bit plain Gaussian codebook, then 1-bit QJL on the residual (its own rotation,

@@ -13,7 +13,7 @@ pub const SPEC: QuantizerSpec = QuantizerSpec {
     family: "RaBitQ",
     params: &["rotation"],
     describe: "Center -> Normalize -> Rotate -> CastAngular(1)",
-    build: |p, seed, dim| rabitq(get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    build: |p, seed, dim| rabitq(get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
 /// `Center -> Normalize -> rotate(seed) -> CastAngular(1)` over input dim `dim`.

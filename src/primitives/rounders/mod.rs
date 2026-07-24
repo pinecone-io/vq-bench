@@ -16,9 +16,11 @@ mod cast_hamming;
 mod cast_normal;
 mod cast_sign;
 mod cast_uint;
+mod kmeans;
 
 pub use cast_angular::CastAngular;
 pub use cast_hamming::CastHamming;
 pub use cast_normal::{CastNormal, NormalScale};
 pub use cast_sign::CastSign;
 pub use cast_uint::CastUint;
+pub use kmeans::Kmeans;

@@ -1,32 +1,29 @@
-//! `qjl`: unit-normalize, rotate, scale, then 1-bit signs — an unbiased inner-product
-//! estimate (the sqrt(2d/pi) scale corrects the sign estimator's bias).
+//! `qjl`: unit-normalize, rotate, then 1-bit signs — an unbiased inner-product estimate
+//! (CastSign's sqrt(pi/2d) scale corrects the sign estimator's bias).
 
 use anyhow::Result;
 
 use super::catalog::{get_or, QuantizerSpec};
 use super::Rotation;
-use crate::{CastSign, Normalize, Pipeline, Scale};
+use crate::{CastSign, Normalize, Pipeline};
 
 pub const SPEC: QuantizerSpec = QuantizerSpec {
     key: "qjl",
     family: "QJL",
     params: &["rotation"],
-    describe: "Normalize -> Rotate -> Scale -> CastSign",
-    build: |p, seed, dim| qjl(get_or(p, "rotation", Rotation::Full)?, seed, dim),
+    describe: "Normalize -> Rotate -> CastSign",
+    build: |p, seed, dim| qjl(get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
 };
 
-/// `Normalize -> rotate(seed) -> Scale(sqrt(2d/pi)) -> CastSign`. `d` is the post-rotation
-/// width (padded under Hadamard), so the sign estimate is unbiased for either rotation.
+/// `Normalize -> rotate(seed) -> CastSign`. CastSign scores with the QJL scale
+/// sqrt(pi/2m), where m is the post-rotation width (padded under Hadamard), so the sign
+/// estimate is unbiased for either rotation.
 pub fn qjl(rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
-    let stage = rotation.stage(dim, seed);
-    let rotated_dim = stage.out_dim(dim);
-    let scale = (2.0 * rotated_dim as f32 / std::f32::consts::PI).sqrt();
     Pipeline::new(
         dim,
         vec![
             Box::new(Normalize),
-            stage,
-            Box::new(Scale::new(scale, 0.0)),
+            rotation.stage(dim, seed),
             Box::new(CastSign),
         ],
     )

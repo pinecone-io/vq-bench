@@ -17,6 +17,7 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
                 ("RandomRotate", "apply a random orthogonal transformation to all vectors"),
                 ("RandomHadamard", "fast near-orthogonal random rotation via the randomized Hadamard transform"),
                 ("OptimizeSigns", "learn an orthogonal rotation minimizing sign-quantization error"),
+                ("OptimizePq", "learn an orthogonal rotation minimizing product-quantization error"),
             ],
         ),
         (
@@ -25,8 +26,15 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
                 ("CastUint", "round [0,1] into 2^b uniform bins, reconstructing to bin centers"),
                 ("CastNormal", "round unit vector with b-bit Lloyd-Max normal codebook"),
                 ("CastAngular", "round unit vector to b-bit grid point of minimum angle"),
-                ("CastSign", "one sign bit per coordinate; asymmetric score <q, sign(x)>"),
-                ("CastHamming", "one sign bit per coordinate; SimHash angle estimate |q| cos(pi hamming/d)"),
+                ("CastSign", "round vector to ±1 but leave query unquantized"),
+                ("CastHamming", "round vector and query to ±1"),
+                ("Kmeans", "round to nearest centroid in a learned k-means (Lloyd) codebook"),
+            ],
+        ),
+        (
+            "splitters",
+            &[
+                ("SegmentSplit", "slice each vector into equal-width segments, one branch per segment"),
             ],
         ),
     ]
