@@ -73,7 +73,7 @@ vqb run configs/minmax-compare.json --dry-run    # validate the config
 vqb run configs/minmax-compare.json              # run the config
 ```
 
-Each run measures **size** (bits per dimension) and the given quality metrics, as well as additional resource metrics (encode time and peak memory, per-query latency, etc.). Results are written to `results/`, including a `.raw` capture of the reconstructions and scoring
+Each run measures size (bits per dimension) and the given quality metrics, as well as additional resource metrics (encode time and peak memory, per-query latency, etc.). Results are written to `results/`, including a `.raw` capture of the reconstructions and scoring
 values, and an aggregated `.json`.
 
 The remaining commands split `run` into reusable stages: `encode` does the

@@ -1,27 +1,32 @@
 {
-  "generated": 1782845341,
+  "generated": 1784915615,
   "runs": [
     {
-      "name": "rotation",
-      "path": "rotation.json",
+      "name": "july-2026",
+      "path": "july-2026.json",
       "datasets": [
         {
           "dataset": "arxiv-nomic-768-normalized",
           "n_base": 1344643
-        }
-      ],
-      "timestamp": 1782758232
-    },
-    {
-      "name": "split",
-      "path": "split.json",
-      "datasets": [
+        },
         {
-          "dataset": "arxiv-nomic-768-normalized",
-          "n_base": 1344643
+          "dataset": "coco-nomic-768-normalized",
+          "n_base": 282360
+        },
+        {
+          "dataset": "ccnews-nomic-768-normalized",
+          "n_base": 495328
+        },
+        {
+          "dataset": "yahoo-minilm-384-normalized",
+          "n_base": 677305
+        },
+        {
+          "dataset": "laion-clip-512-normalized",
+          "n_base": 1000448
         }
       ],
-      "timestamp": 1782763738
+      "timestamp": 1784908790
     }
   ]
 }

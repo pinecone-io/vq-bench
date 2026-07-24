@@ -21,9 +21,9 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;marg
 #nav a.gh .ghmark{display:block;width:17px;height:17px}
 
 /* ── brand hero (matches the landing page's header) ─────────────────────── */
-#brand{text-align:center;font-size:30px;font-weight:700;letter-spacing:-0.01em;
+#brand{text-align:center;font-size:34px;font-weight:700;letter-spacing:-0.01em;
        color:#111;padding:18px 14px 2px;margin:0}
-#tagline{text-align:center;font-size:15.5px;color:#777;padding:0 14px 18px;margin:0}
+#tagline{text-align:center;font-size:17px;color:#555;padding:0 14px 18px;margin:0}
 
 /* ── footer (fixed, Pinecone in the right corner — matches the landing page) ── */
 #foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:11px 24px;

@@ -82,9 +82,9 @@
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
   .fam{text-align:left;color:#444}
   /* brand header + about banner */
-  #brand{text-align:center;font-size:30px;font-weight:700;letter-spacing:-0.01em;
+  #brand{text-align:center;font-size:34px;font-weight:700;letter-spacing:-0.01em;
          color:#111;padding:18px 14px 2px;margin:0}
-  #tagline{text-align:center;font-size:15.5px;color:#777;padding:0 14px 14px;margin:0}
+  #tagline{text-align:center;font-size:17px;color:#555;padding:0 14px 14px;margin:0}
   #about{padding:4px 14px 16px}
   #sep{border:none;border-top:3px solid #ccc;margin:0 0 4px}
   #about p{font-size:15.5px;line-height:1.55;color:#444;margin:0 0 8px}
@@ -107,6 +107,8 @@
   table.info{border-collapse:collapse;font-size:15px;width:100%;margin-bottom:6px}
   table.info th,table.info td{padding:7px 10px;text-align:left;white-space:normal;
                               vertical-align:top;border-bottom:1px solid #eee}
+  /* Give the leading term column (Quantizer / Metric) more room. */
+  table.info.wide-first th:first-child,table.info.wide-first td:first-child{width:26%;white-space:nowrap}
   table.info th{background:#f4f4f6;position:static;font-weight:600;color:#333;border-bottom:2px solid #ddd}
   table.info tr:hover td{background:#f7f9fc}
   table.info td.num{white-space:nowrap}
@@ -129,12 +131,12 @@
 <p id="tagline">a composable vector quantization framework</p>
 
 <section id="about">
-  <p><b>VQ-bench</b> is an open-source benchmark and framework for vector quantization. It implements several algorithmic <b>primitives</b> (written in Rust) and builds <b>quantizers</b> by composing these primitives. It supports several high-dimensional embedding datasets and measures how different quantizers trade off size (e.g., bits-per-dimension) against quality (e.g., reconstruction error, recall). VQ-bench reports these metrics side-by-side and lets you explore the results interactively. It is intended to be a living, breathing comparison of the best quantization algorithms and a testbed for developing new algorithms.</p>
+  <p><b>VQ-bench</b> is an open-source benchmark and framework for vector quantization. It implements several algorithmic primitives and builds quantizers by composing these primitives. We evaluate the performance of existing quantizers on several size and quality metrics and we publish the results on this page. </p>
 
   <details>
     <summary>Quantizers</summary>
     <p>Each method evaluated in VQ-bench, with a link to its source.</p>
-    <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
+    <table class="info wide-first"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
     <tbody id="refbody"></tbody></table>
     <p class="note">MinMax (per-vector) and Scalar (per-dimension) are uniform min–max quantization baselines with no dedicated reference.</p>
   </details>
@@ -154,7 +156,7 @@
   </details>
   <details>
     <summary>Metrics</summary>
-    <table class="info">
+    <table class="info wide-first">
       <thead><tr><th>Metric</th><th>What it measures</th><th>Better</th></tr></thead>
       <tbody>
         <tr class="grp"><td colspan="3">KV-cache values / signal compression</td></tr>
@@ -172,7 +174,7 @@
         <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ</td><td>lower</td></tr>
       </tbody>
     </table>
-    <p class="note">We also report size and cost metrics (bits per dimension, peak / encode memory, encode / scoring time). Time and memory statistics were measured on an Apple M2 Pro with 16GB RAM.</p>
+    <p class="note">We also report size and efficiency metrics (bits per dimension, peak / encode memory, encode / scoring time). All time and memory statistics were measured on an Apple M2 Pro with 16GB RAM using 6 threads.</p>
   </details>
   <p style="margin-top:16px;padding-top:12px"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is actively maintained by Amir Ingber, Edo Liberty (Pinecone), and Ashwin Padaki (UPenn).</p>
 </section>
@@ -202,6 +204,7 @@
     <div class="ctl"><label>group</label><select id="gsel">
       <option value="family">family</option><option value="method">method</option></select></div>
     <div class="ctl"><label>filter</label><input type="text" id="q" placeholder="e.g. PQ, EDEN, B=4"></div>
+    <div class="ctl"><span class="chk"><input type="checkbox" id="autoscale"><label for="autoscale">autoscale</label></span></div>
     <div class="ctl" id="dlbtns">
       <button id="btn-png">download plot (png)</button>
     </div>
@@ -324,6 +327,7 @@ function parseDataset(block, meta){
 }
 
 let DATA = null, famColor = {}, curFname = "vq-bench";
+let AUTOSCALE = false;          // persistent axis-autoscale toggle; survives dataset/metric switches
 let hiddenSeries = new Set();   // series names currently toggled off
 let plotSeries = [];            // ordered {name,color,dashed,square}, aligned to plot trace order
 let panelSig = "";              // signature of the panel's series set; rebuild only when it changes
@@ -409,6 +413,16 @@ function axisLayout(vals, field, log, label){
     // distinct precision; we don't cap it, which would make ticks all-identical).
     automargin:true,
   };
+  // Persistent autoscale: hand ranging to Plotly (keep log formatting) and skip
+  // the computed fixed ranges below, so it stays on across dataset/metric switches.
+  if(AUTOSCALE){
+    ax.autorange = true;
+    if(log){
+      ax.type = "log"; ax.dtick = 1; ax.exponentformat = "power"; ax.showexponent = "all";
+      ax.minor = {showgrid:true, gridcolor:"#f0f0f0", ticks:"outside", ticklen:4, tickwidth:1.4, tickcolor:"#999"};
+    }
+    return ax;
+  }
   const v = vals.filter(x=>x!=null && (!log || x>0));
   if(field==="recall" && !log){ ax.range=[0,1.02]; return ax; }
   if(!v.length){ ax.autorange=true; return ax; }
@@ -491,10 +505,31 @@ function redraw(){
   curFname = `vq-bench-${yf}-vs-${xf}`;
   Plotly.react("fig", traces, layout, {
     responsive:true, displaylogo:false, displayModeBar:"hover",
-    modeBarButtonsToRemove:["toImage","select2d","lasso2d"],      // downloads live in the toolbar buttons
+    modeBarButtonsToRemove:["toImage","select2d","lasso2d","resetScale2d"],   // downloads + reset live elsewhere; autoscale is our own toggle
   });
+  bindAutoscaleSync();
   plotSeries = seriesMeta;
   syncLegendPanel(seriesMeta);
+}
+
+// Keep the autoscale checkbox in sync with the plot's real range state. A manual
+// zoom/pan writes explicit ranges (autoscale effectively off) → uncheck it; a
+// double-click / Plotly autoscale writes autorange:true → check it. Bound once;
+// the handler survives Plotly.react re-renders on the same #fig div.
+let autoscaleBound = false;
+function bindAutoscaleSync(){
+  if(autoscaleBound) return;
+  const gd = document.getElementById("fig");
+  if(!gd || !gd.on) return;
+  gd.on("plotly_relayout", ev => {
+    const keys = Object.keys(ev || {});
+    const cb = document.getElementById("autoscale");
+    const manual = keys.some(k => /\.range(\[|$)/.test(k));           // zoom/pan set an explicit range
+    const auto   = keys.some(k => /\.autorange$/.test(k)) && keys.every(k => !/\.range(\[|$)/.test(k));
+    if(manual && AUTOSCALE){ AUTOSCALE = false; cb.checked = false; }
+    else if(auto && !AUTOSCALE){ AUTOSCALE = true; cb.checked = true; }
+  });
+  autoscaleBound = true;
 }
 
 // ── HTML legend / series-toggle panel ───────────────────────────────────────────
@@ -822,6 +857,7 @@ const xsel=document.getElementById("xsel"), ysel=document.getElementById("ysel")
 xsel.onchange=()=>{ document.getElementById("xlog").checked=FIELDS[xsel.value].log; redraw(); };
 ysel.onchange=()=>{ document.getElementById("ylog").checked=FIELDS[ysel.value].log; redraw(); };
 for(const id of ["xlog","ylog","ksel","tsel"]) document.getElementById(id).addEventListener("change", redraw);
+document.getElementById("autoscale").addEventListener("change", e=>{ AUTOSCALE = e.target.checked; redraw(); });
 // group switches the series namespace (families ↔ methods) → reset hidden state first.
 document.getElementById("gsel").addEventListener("change", ()=>{ hiddenSeries.clear(); panelSig=""; redraw(); });
 document.getElementById("q").addEventListener("input", redraw);

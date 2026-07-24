@@ -1,6 +1,6 @@
 # Overview
 
-**VQ-bench** is an open-source benchmark and framework for vector quantization. The purpose of this documentation is to explain the core motivation and design principles behind VQ-bench and to provide detailed guidelines for contributing to the project. 
+**VQ-bench** is an open-source benchmark and framework for vector quantization. The purpose of this documentation is to explain the core motivation and design principles behind VQ-bench and to (eventually) provide detailed guidelines for contributing to the project. 
 
 ## Motivation
 
@@ -31,13 +31,9 @@ In VQ-bench, the default way to build a quantizer is by specifying a pipeline of
 - **Rounders:** These are mappings from each vector to a fixed or learned codebook. Examples include *integer casting*, *angular casting*, and *k-means rounding*. 
 - **Splitters:** These are branching operations which split the dataset into chunks, each handled by downstream primitives. A common example is *segmenting by columns*.
 
-Many vector quantization algorithms can be written as compositions of primitives. For example:
+Most quantizers can be written as compositions of primitives. For example:
 ```
 SimHash   = center.normalize.random_rotate.cast_hamming
 E-RaBitQ  = center.normalize.random_rotate.cast_angular
 PQ        = segment_columns.kmeans
 ```
-
-## Contributing to VQ-bench
-
-First, familiarize yourself with [how to use VQ-bench](docs.html#usage). If you're interested in contributing, check out the guides on [adding a primitive](docs.html#adding-a-primitive) and [adding a quantizer](docs.html#adding-a-quantizer).
