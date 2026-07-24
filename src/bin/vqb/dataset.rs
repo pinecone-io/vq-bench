@@ -367,6 +367,28 @@ fn current_candidate_width(path: &Path) -> Result<usize> {
     Ok(shape[1])
 }
 
+/// An array's name paired with its `{rows, cols}` shape, or `None` if absent.
+pub type ArrayShape = (&'static str, Option<(usize, usize)>);
+
+/// The `{rows, cols}` shape of each stored array; `None` for an absent optional
+/// array (only `calib` may be missing).
+pub fn array_shapes(path: &Path) -> Result<Vec<ArrayShape>> {
+    let file = hdf5::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    ["base", "calib", "eval", "eval_candidates"]
+        .into_iter()
+        .map(|name| {
+            if !has(&file, name) {
+                return Ok((name, None));
+            }
+            let shape = file.dataset(name).context(name)?.shape();
+            if shape.len() != 2 {
+                bail!("`{name}` must be 2-D, got shape {shape:?}");
+            }
+            Ok((name, Some((shape[0], shape[1]))))
+        })
+        .collect()
+}
+
 /// Recompute `eval_candidates` at width `l` from the stored `base`/`eval`. Reads the
 /// existing file read-only and writes a fresh one atomically (see `write_dataset`), so
 /// an interrupted recompute leaves the previous dataset intact rather than corrupting
@@ -414,6 +436,38 @@ mod tests {
         assert_eq!(loaded.eval.dim(), (2, 2));
         assert!(loaded.calib.is_none());
         assert_eq!(loaded.eval_candidates, vec![vec![1, 3, 0], vec![2, 3, 0]]);
+    }
+
+    /// `array_shapes` reports each stored array's dims; an absent `calib` is `None`.
+    #[test]
+    fn array_shapes_reports_stored_dims() {
+        let dir = std::env::temp_dir().join("vqb-dataset-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("shapes-src.hdf5");
+        let dest = dir.join("shapes-formatted.hdf5");
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dest);
+
+        let f = hdf5::File::create(&src).unwrap();
+        let train = Array2::from_shape_vec((4, 2), vec![0., 0., 1., 0., 0., 1., 1., 1.]).unwrap();
+        let test = Array2::from_shape_vec((2, 2), vec![0.9, 0.1, 0.2, 0.8]).unwrap();
+        write_rows(&f, "train", &train).unwrap();
+        write_rows(&f, "test", &test).unwrap();
+        write_neighbors(&f, "neighbors", &[vec![1, 3, 0], vec![2, 3, 0]]).unwrap();
+        drop(f);
+
+        reformat(&src, &dest, None).unwrap();
+        assert_eq!(
+            array_shapes(&dest).unwrap(),
+            vec![
+                ("base", Some((4, 2))),
+                ("calib", None),
+                ("eval", Some((2, 2))),
+                ("eval_candidates", Some((2, 3))),
+            ]
+        );
+        std::fs::remove_file(&src).ok();
+        std::fs::remove_file(&dest).ok();
     }
 
     /// A bad source (a neighbor index outside `train`) must fail at reformat time,

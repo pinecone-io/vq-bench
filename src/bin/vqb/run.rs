@@ -215,11 +215,12 @@ fn table_header(
     _name: &str,
     dim: usize,
     n_base: usize,
+    n_fit: usize,
     n_eval: usize,
     n_candidates: usize,
     dk: usize,
 ) {
-    eprintln!("  dim {dim} · base {n_base} · eval {n_eval} · n_cand {n_candidates}");
+    eprintln!("  dim {dim} · base {n_base} · fit {n_fit} · eval {n_eval} · n_cand {n_candidates}");
     eprintln!(
         "  {:<22}{:>10}{:>12}{:>13}{:>13}{:>9}{:>10}",
         "method",
@@ -491,7 +492,7 @@ fn run_dataset<W: std::io::Write>(
     } else {
         *cfg.ks.last().unwrap_or(&1)
     };
-    table_header(name, dim, n_base, head.n_eval, n_candidates, dk);
+    table_header(name, dim, n_base, n_fit, head.n_eval, n_candidates, dk);
 
     let mut method_results = Vec::with_capacity(methods.len());
     for m in methods {

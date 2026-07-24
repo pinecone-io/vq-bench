@@ -189,7 +189,11 @@ fn data(action: DataCmd) -> Result<()> {
                 "local:  {}",
                 if d.is_local() { "present" } else { "missing" }
             );
-            println!("arrays: base, calib, eval, eval_candidates");
+            if d.is_local() {
+                print_arrays(d)?;
+            } else {
+                println!("arrays: base, calib, eval, eval_candidates (download to see shapes)");
+            }
             Ok(())
         }
         DataCmd::Get {
@@ -207,6 +211,25 @@ fn data_get(name: &str, candidates: Option<usize>) -> Result<()> {
 #[cfg(not(feature = "hdf5"))]
 fn data_get(_name: &str, _candidates: Option<usize>) -> Result<()> {
     bail!("`vqb data get` needs the hdf5 feature; rebuild with default features")
+}
+
+/// Print each stored array's `{rows, cols}` shape (needs the file open, so hdf5-only).
+#[cfg(feature = "hdf5")]
+fn print_arrays(d: &registry::Dataset) -> Result<()> {
+    println!("arrays:");
+    for (name, shape) in dataset::array_shapes(&d.local_path())? {
+        match shape {
+            Some((rows, cols)) => println!("  {name:<16} {rows} × {cols}"),
+            None => println!("  {name:<16} absent"),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "hdf5"))]
+fn print_arrays(_d: &registry::Dataset) -> Result<()> {
+    println!("arrays: base, calib, eval, eval_candidates");
+    Ok(())
 }
 
 fn run(path: &std::path::Path, dry_run: bool, fresh: bool) -> Result<()> {
