@@ -8,19 +8,22 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
         (
             "conditioners",
             &[
-                ("minmax", "affine scale each vector into desired target range"),
-                ("minmax_dim", "affine scale each dimension into the target range, calibrated over the fit set"),
-                ("absmax", "scale each vector into [-1,1] by dividing by max absolute value"),
-                ("normalize", "scale each vector to unit L2 norm"),
-                ("center", "subtract the mean over the fit set from every vector"),
-                ("scale", "apply a fixed affine scaling to every vector"),
-                ("random_rotate", "apply a random orthogonal transformation to all vectors"),
+                ("MinMax", "affine scale each vector into desired target range"),
+                ("MinMaxDim", "affine scale each dimension into the target range, calibrated over the fit set"),
+                ("AbsMax", "scale each vector into [-1,1] by dividing by max absolute value"),
+                ("Normalize", "scale each vector to unit L2 norm"),
+                ("Center", "subtract the mean over the fit set from every vector"),
+                ("Scale", "apply a fixed affine scaling to every vector"),
+                ("RandomRotate", "apply a random orthogonal transformation to all vectors"),
+                ("RandomHadamard", "fast near-orthogonal random rotation via the randomized Hadamard transform"),
             ],
         ),
         (
             "rounders",
             &[
-                ("cast(uint)", "round [0,1] into 2^b uniform bins, reconstructing to bin centers"),
+                ("CastUint", "round [0,1] into 2^b uniform bins, reconstructing to bin centers"),
+                ("CastNormal", "round unit vector with b-bit Lloyd-Max normal codebook"),
+                ("CastAngular", "round unit vector to b-bit grid point of minimum angle"),
             ],
         ),
     ]

@@ -38,7 +38,7 @@ A run configuration is a single JSON file describing the datasets, evaluation pa
 |---|---|
 | `datasets` | dataset names (or unique prefixes) to run |
 | `methods` | quantizers to run, formatted as `{ "name": <key>, params }` |
-| `metrics` | quality metrics to report |
+| `metrics` | quality metrics to report (default: all metrics) |
 | `k` | the `k` values for recall@k / SOS@k (default `[1, 10, 50]`) |
 | `temp` | softmax temperatures for the `kl` / `tv` metrics (default `[0.5, 1.0, 2.0]`) |
 | `seed` | master seed for all sampling and seeded primitives (default `1`) |

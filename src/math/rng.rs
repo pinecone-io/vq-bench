@@ -1,7 +1,7 @@
 //! Seeded randomness. ChaCha8 is the one RNG the crate uses.
 
 use ndarray::Array2;
-use rand::SeedableRng;
+use rand::{RngExt, SeedableRng};
 use rand_distr::{Distribution, StandardNormal};
 
 use super::linalg::qr_q;
@@ -22,6 +22,11 @@ pub fn gaussian(rng: &mut Rng, (rows, cols): (usize, usize)) -> Array2<f32> {
 /// A `d × d` Haar-random orthogonal matrix (the `Q` factor of a Gaussian's QR).
 pub fn random_orthogonal(rng: &mut Rng, d: usize) -> Array2<f32> {
     qr_q(gaussian(rng, (d, d)).view())
+}
+
+/// A `(rows, cols)` matrix of i.i.d. Rademacher (±1) samples.
+pub fn rademacher(rng: &mut Rng, (rows, cols): (usize, usize)) -> Array2<f32> {
+    Array2::from_shape_fn((rows, cols), |_| if rng.random_bool(0.5) { 1.0 } else { -1.0 })
 }
 
 #[cfg(test)]

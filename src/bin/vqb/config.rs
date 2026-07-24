@@ -17,7 +17,8 @@ pub struct RunConfig {
     pub datasets: Vec<String>,
     /// The quantizers to run, with their (possibly swept) parameters.
     pub methods: Vec<MethodConfig>,
-    /// Metrics to report.
+    /// Metrics to report; empty or omitted means all known metrics.
+    #[serde(default)]
     pub metrics: Vec<String>,
     /// `k` values for recall@k / SOS@k.
     #[serde(rename = "k", default = "default_ks")]
@@ -147,8 +148,13 @@ impl RunConfig {
     pub fn parse(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        let cfg: RunConfig = serde_json::from_str(&text)
+        let mut cfg: RunConfig = serde_json::from_str(&text)
             .with_context(|| format!("parsing config {}", path.display()))?;
+        // Empty or omitted `metrics` means "all" — expand here so validate/run/eval
+        // all see the full set.
+        if cfg.metrics.is_empty() {
+            cfg.metrics = KNOWN_METRICS.iter().map(|(n, _)| n.to_string()).collect();
+        }
         Ok(cfg)
     }
 

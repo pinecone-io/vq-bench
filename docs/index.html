@@ -136,7 +136,7 @@
     <p>Each method evaluated in VQ-bench, with a link to its source.</p>
     <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
     <tbody id="refbody"></tbody></table>
-    <p class="note">MinMax is a uniform per-vector min–max baseline with no dedicated reference.</p>
+    <p class="note">MinMax (per-vector) and Scalar (per-dimension) are uniform min–max quantization baselines with no dedicated reference.</p>
   </details>
   <details>
     <summary>Datasets</summary>
@@ -158,17 +158,17 @@
       <thead><tr><th>Metric</th><th>What it measures</th><th>Better</th></tr></thead>
       <tbody>
         <tr class="grp"><td colspan="3">KV-cache values / signal compression</td></tr>
-        <tr><td><b>reconstruction MSE</b></td><td>average squared distance between the true vector and the reconstructed vector.</td><td>lower</td></tr>
-        <tr><td><b>reconstruction bias</b></td><td>squared norm of the average residual vector (true vector &minus; approximated vector).</td><td>lower</td></tr>
+        <tr><td><b>reconstruction MSE</b></td><td>average squared distance between the true vector and the reconstructed vector</td><td>lower</td></tr>
+        <tr><td><b>reconstruction bias</b></td><td>squared norm of the average residual vector (true vector &minus; approximated vector)</td><td>lower</td></tr>
         <tr class="grp"><td colspan="3">Model weights compression</td></tr>
-        <tr><td><b>score MSE</b></td><td>average squared error of the inner-product estimates between queries and candidates.</td><td>lower</td></tr>
-        <tr><td><b>score bias</b></td><td>bias of the inner-product estimates.</td><td>→ 0</td></tr>
+        <tr><td><b>score MSE</b></td><td>average squared error of the inner-product estimates between queries and candidates</td><td>lower</td></tr>
+        <tr><td><b>score bias</b></td><td>bias of the inner-product estimates</td><td>→ 0</td></tr>
         <tr class="grp"><td colspan="3">Vector search / recommendations</td></tr>
-        <tr><td><b>recall@k</b></td><td>fraction of the true top-k neighbors contained in the approximated top-k.</td><td>higher</td></tr>
-        <tr><td><b>SOS@k</b></td><td>ratio of summed top-k approximated scores and summed true top-k scores.</td><td>higher</td></tr>
+        <tr><td><b>recall@k</b></td><td>fraction of the true top-k neighbors contained in the approximated top-k</td><td>higher</td></tr>
+        <tr><td><b>SOS@k</b></td><td>ratio of summed top-k approximated scores and summed true top-k scores</td><td>higher</td></tr>
         <tr class="grp"><td colspan="3">KV-cache keys</td></tr>
-        <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax distributions induced by true and approximate candidate scores, at temperature τ.</td><td>lower</td></tr>
-        <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ.</td><td>lower</td></tr>
+        <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax distributions induced by true and approximate candidate scores, at temperature τ</td><td>lower</td></tr>
+        <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ</td><td>lower</td></tr>
       </tbody>
     </table>
     <p class="note">We also report size and cost metrics (bits per dimension, peak / encode memory, encode / scoring time). Time and memory statistics were measured on an Apple M2 Pro with 16GB RAM.</p>
@@ -235,7 +235,7 @@ const COLORS = {
   // RaBitQ family — oranges
   "RaBitQ":"#e6550d", "E-RaBitQ":"#fdae6b",
   // EDEN family — greens
-  "EDEN":"#238b45", "EDEN-unbiased":"#74c476",
+  "EDEN-MSE":"#238b45", "EDEN-prod":"#74c476",
   // TurboQuant family — purples
   "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
   // ITQ / learned-rotation family — blues
@@ -248,8 +248,8 @@ const COLORS = {
   "KIVI":"#fb9a99",    // salmon
   "GEAR":"#7f7f7f",    // gray
   "Int":"#e7298a",     // magenta-pink
-  "Scalar":"#d62728",  // red
-  "MinMax":"#bf9000",  // gold
+  // baselines — grays
+  "Scalar":"#6e6e6e", "MinMax":"#a6a6a6",
 };
 // Fallback for any future family not listed above — broadened so new methods
 // don't immediately collide.
@@ -771,7 +771,13 @@ function loadRun(run){
 // PALETTE color assignColors() hands out in benchmark.json family order.
 // One row per *implemented* quantizer; add a row here as each method lands.
 const REFS = [
-  {n:"MinMax",          c:"#bf9000", y:null, t:"Uniform per-vector min–max baseline", u:null},
+  {n:"MinMax",          c:"#a6a6a6", y:null, t:"Uniform per-vector min–max baseline", u:null},
+  {n:"Scalar",          c:"#6e6e6e", y:null, t:"Per-dimension min–max scalar quantization baseline", u:null},
+  {n:"EDEN-MSE",        c:"#238b45", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"EDEN-prod",       c:"#74c476", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"TurboQuant-MSE",  c:"#6a51a3", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
+  {n:"RaBitQ",          c:"#e6550d", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2405.12497"},
+  {n:"E-RaBitQ",        c:"#fdae6b", y:2024, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2409.09913"},
 ];
 (function renderRefs(){
   const tb = document.getElementById("refbody");

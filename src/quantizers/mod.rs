@@ -4,7 +4,7 @@ pub mod catalog;
 
 use ndarray::{Array2, ArrayView2};
 
-use crate::{Pipeline, Primitive, Quantizer};
+use crate::{Pipeline, Primitive, Quantizer, RandomHadamard, RandomRotate};
 
 /// Register the in-tree quantizer families: declare each builder module and
 /// collect its `SPEC` into `QUANTIZERS`. Add a family by writing its module (with
@@ -17,7 +17,27 @@ macro_rules! quantizers {
     };
 }
 
-quantizers! { minmax, scalar }
+quantizers! { minmax, scalar, eden_mse, eden_prod, turboquant_mse, rabitq, e_rabitq }
+
+/// The orthogonal rotation a quantizer applies before rounding: the full dense
+/// Haar-random matrix (`O(d^2)`) or the randomized Hadamard transform (`O(d log d)`).
+/// The shared `rotation` param, so a config can sweep either without changing the
+/// pipeline.
+#[derive(Clone, Copy)]
+pub(crate) enum Rotation {
+    Full,
+    Hadamard,
+}
+
+impl Rotation {
+    /// The rotation stage for input dim `dim`, seeded by `seed`.
+    pub(crate) fn stage(self, dim: usize, seed: u64) -> Box<dyn Primitive> {
+        match self {
+            Rotation::Full => Box::new(RandomRotate::new(seed)),
+            Rotation::Hadamard => Box::new(RandomHadamard::new(dim, seed)),
+        }
+    }
+}
 
 /// A named [`Pipeline`], runnable through the [`Quantizer`] interface. `name` is
 /// the display **family name** (e.g. `MinMax`); the runner forms a **method name**

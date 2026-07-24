@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::Pipeline;
 
-use super::NamedQuantizer;
+use super::{NamedQuantizer, Rotation};
 
 pub use super::QUANTIZERS;
 
@@ -104,6 +104,18 @@ pub(crate) fn get<T: FromParam>(params: &BTreeMap<String, Value>, key: &str) -> 
     T::from_value(v).with_context(|| format!("param `{key}`"))
 }
 
+/// Read an optional typed param, or `default` when the key is absent.
+pub(crate) fn get_or<T: FromParam>(
+    params: &BTreeMap<String, Value>,
+    key: &str,
+    default: T,
+) -> Result<T> {
+    match params.get(key) {
+        None => Ok(default),
+        Some(v) => T::from_value(v).with_context(|| format!("param `{key}`")),
+    }
+}
+
 /// A config param type: how to parse one from JSON. Grows one impl per type used.
 pub(crate) trait FromParam: Sized {
     fn from_value(v: &Value) -> Result<Self>;
@@ -113,6 +125,16 @@ impl FromParam for u8 {
     fn from_value(v: &Value) -> Result<u8> {
         let n = v.as_u64().context("must be a non-negative integer")?;
         u8::try_from(n).map_err(|_| anyhow!("={n} out of range 0..=255"))
+    }
+}
+
+impl FromParam for Rotation {
+    fn from_value(v: &Value) -> Result<Rotation> {
+        match v.as_str().context("must be a string")? {
+            "full" => Ok(Rotation::Full),
+            "hadamard" => Ok(Rotation::Hadamard),
+            other => Err(anyhow!("unknown rotation `{other}` (expected `full` or `hadamard`)")),
+        }
     }
 }
 

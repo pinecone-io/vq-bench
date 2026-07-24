@@ -12,14 +12,14 @@ mod quantizers;
 mod splitter;
 mod util;
 
-pub(crate) use util::coding;
+pub(crate) use util::{codebooks, coding};
 
 pub use math::matmul;
 pub use pipeline::Pipeline;
 pub use primitive::Primitive;
 pub use primitives::{
-    catalog as primitive_catalog, AbsMax, CastUint, Center, MinMax, MinMaxDim, Normalize,
-    RandomRotate, Scale,
+    catalog as primitive_catalog, AbsMax, CastAngular, CastNormal, CastUint, Center, MinMax,
+    MinMaxDim, Normalize, NormalScale, RandomHadamard, RandomRotate, Scale,
 };
 pub use quantizer::{byte_split, AsQuantizer, Quantizer};
 pub use quantizers::{catalog, NamedQuantizer};

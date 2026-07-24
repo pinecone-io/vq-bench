@@ -11,6 +11,10 @@ fn code_dim(model: &[u8], child: Option<ArrayView2<f32>>) -> usize {
     child.map_or_else(|| coding::unpack_model::<usize>(model), |c| c.ncols())
 }
 
+mod cast_angular;
+mod cast_normal;
 mod cast_uint;
 
+pub use cast_angular::CastAngular;
+pub use cast_normal::{CastNormal, NormalScale};
 pub use cast_uint::CastUint;

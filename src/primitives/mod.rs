@@ -6,5 +6,7 @@ pub mod catalog;
 mod conditioners;
 mod rounders;
 
-pub use conditioners::{AbsMax, Center, MinMax, MinMaxDim, Normalize, RandomRotate, Scale};
-pub use rounders::CastUint;
+pub use conditioners::{
+    AbsMax, Center, MinMax, MinMaxDim, Normalize, RandomHadamard, RandomRotate, Scale,
+};
+pub use rounders::{CastAngular, CastNormal, CastUint, NormalScale};
