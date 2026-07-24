@@ -1,0 +1,65 @@
+<!doctype html><html><head><meta charset="utf-8"><title>VQ-bench · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+<link rel="stylesheet" href="assets/hljs-theme.css">
+<script defer src="assets/site.js"></script>
+<script src="assets/marked.min.js"></script>
+<script src="assets/hljs.min.js"></script>
+</head><body>
+
+<header id="brand">VQ-bench</header>
+<p id="tagline">a composable vector quantization framework</p>
+
+<div id="doclayout">
+  <nav id="docnav"><ul></ul></nav>
+  <main id="doc"><div id="docmsg">Loading…</div></main>
+</div>
+
+<footer id="foot"><a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a></footer>
+
+<script>
+// Docs are plain Markdown under content/, rendered client-side. Add a page by
+// dropping a .md in content/ and adding a row here. Hash routing (#slug) selects
+// the page; the sidebar mirrors this list.
+const DOCS = [
+  {slug:"overview",           title:"Overview",            file:"content/overview.md"},
+  {slug:"usage",              title:"Usage",               file:"content/usage.md"},
+];
+
+function buildSidebar(){
+  const ul = document.querySelector("#docnav ul");
+  ul.innerHTML = DOCS.map(d => `<li><a data-slug="${d.slug}" href="#${d.slug}">${d.title}</a></li>`).join("");
+}
+
+function markActive(slug){
+  document.querySelectorAll("#docnav a").forEach(a => a.classList.toggle("active", a.dataset.slug===slug));
+}
+
+async function show(slug){
+  const doc = DOCS.find(d => d.slug===slug) || DOCS[0];
+  markActive(doc.slug);
+  const main = document.getElementById("doc");
+  main.innerHTML = `<div id="docmsg">Loading…</div>`;
+  try {
+    const md = await (await fetch(doc.file)).text();
+    main.innerHTML = marked.parse(md);
+    // Highlight fenced blocks; tagged fences use their language, untagged auto-detect.
+    main.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
+    document.title = `VQ-bench · ${doc.title}`;
+  } catch {
+    main.innerHTML = `<div id="docmsg">Could not load <code>${doc.file}</code>. Serve this site over HTTP (the docs are fetched at runtime).</div>`;
+  }
+}
+
+function route(){
+  const slug = (location.hash || "").replace(/^#/, "");
+  show(DOCS.some(d => d.slug===slug) ? slug : DOCS[0].slug);
+}
+
+buildSidebar();
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body></html>

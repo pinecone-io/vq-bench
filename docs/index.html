@@ -3,9 +3,17 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Shared site chrome (top nav). Progressive: absent in a standalone `vqb view`
+     export, where everything below is inline so the page stands on its own. -->
+<link rel="stylesheet" href="assets/site.css">
+<script defer src="assets/site.js"></script>
 <style>
-  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 5%;margin-right:5%;color:#222;padding-bottom:46px;font-size:15px}
+  /* Always reserve the scrollbar track so percentage margins don't re-center
+     (and shift the header) between pages of different heights. */
+  html{overflow-y:scroll}
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 20%;margin-right:20%;color:#222;padding-bottom:46px;font-size:16px}
   h1{font-size:17px;margin:10px 14px 2px}
+  #benchhead{font-size:26px;font-weight:700;letter-spacing:-0.01em;color:#111;margin:18px 14px 12px}
   #title .meta{font-weight:400;color:#666}
   #top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:8px 14px;border-bottom:1px solid #eee}
   #top label{font-size:13px;color:#555}
@@ -50,7 +58,19 @@
   }
   /* table tab */
   #tab-table{padding:8px 14px 18px}
-  #tq{padding:6px 10px;font-size:14px;width:240px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px}
+  #tbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  #tq{padding:6px 10px;font-size:14px;width:240px;border:1px solid #ccc;border-radius:6px}
+  #colwrap{position:relative}
+  #colbtn{font-size:14px;padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#222;cursor:pointer}
+  #colbtn:hover{background:#f4f4f6}
+  #colpop{position:absolute;z-index:30;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #ddd;
+          border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.12);padding:6px;width:230px;max-height:340px;overflow-y:auto}
+  #collist .colrow{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:6px;font-size:13px}
+  #collist .colrow:hover{background:#f4f6fa}
+  #collist .colrow.drag{opacity:0.45}
+  #collist .colrow .grip{color:#bbb;cursor:grab}
+  #collist .colrow input{cursor:pointer;margin:0;flex:0 0 auto}
+  #collist .colrow .lbl{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}
   table{border-collapse:collapse;font-size:14px;width:100%}
   th,td{padding:6px 10px;text-align:right;white-space:nowrap}
   th{background:#f4f4f6;cursor:pointer;user-select:none;position:sticky;top:0;border-bottom:2px solid #ddd}
@@ -62,23 +82,33 @@
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
   .fam{text-align:left;color:#444}
   /* brand header + about banner */
-  #brand{text-align:center;font-size:30px;font-weight:700;letter-spacing:-0.01em;
+  #brand{text-align:center;font-size:34px;font-weight:700;letter-spacing:-0.01em;
          color:#111;padding:18px 14px 2px;margin:0}
-  #tagline{text-align:center;font-size:14px;color:#777;padding:0 14px 12px;margin:0}
+  #tagline{text-align:center;font-size:17px;color:#555;padding:0 14px 14px;margin:0}
   #about{padding:4px 14px 16px}
   #sep{border:none;border-top:3px solid #ccc;margin:0 0 4px}
-  #about p{font-size:14.5px;line-height:1.55;color:#444;margin:0 0 8px}
-  #about details,#below details{margin-top:6px;font-size:14px}
-  #about summary,#below summary{cursor:pointer;color:#1f6feb;font-weight:600;font-size:13.5px;
-                 text-transform:uppercase;letter-spacing:0.04em;outline:none}
-  #about details[open] summary,#below details[open] summary{margin-bottom:8px}
+  #about p{font-size:15.5px;line-height:1.55;color:#444;margin:0 0 8px}
+  /* Info sections as a clean accordion: a rotating chevron, hairline dividers,
+     no uppercase-link styling. */
+  #about details{border-top:1px solid #ececec;font-size:14.5px}
+  #about details:last-of-type{border-bottom:1px solid #ececec;margin-bottom:6px}
+  #about summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;
+                 padding:12px 2px;font-size:15.5px;font-weight:600;color:#333;outline:none}
+  #about summary::-webkit-details-marker{display:none}
+  #about summary::before{content:"\203A";display:inline-block;color:#bbb;font-size:19px;font-weight:400;
+                         line-height:1;transition:transform .15s ease}
+  #about details[open] summary{color:#111}
+  #about details[open] summary::before{transform:rotate(90deg)}
+  #about details > *:not(summary){margin:0 0 12px 24px}
   .note{font-size:13px;color:#888;margin-top:8px}
   /* section below the plots (References dropdown) + info tables — left-aligned text tables */
   #below{padding:14px 14px 24px;max-width:960px}
   #below details p{font-size:14px;color:#666;margin:0 0 12px}
-  table.info{border-collapse:collapse;font-size:14px;width:100%;margin-bottom:6px}
+  table.info{border-collapse:collapse;font-size:15px;width:100%;margin-bottom:6px}
   table.info th,table.info td{padding:7px 10px;text-align:left;white-space:normal;
                               vertical-align:top;border-bottom:1px solid #eee}
+  /* Give the leading term column (Quantizer / Metric) more room. */
+  table.info.wide-first th:first-child,table.info.wide-first td:first-child{width:26%;white-space:nowrap}
   table.info th{background:#f4f4f6;position:static;font-weight:600;color:#333;border-bottom:2px solid #ddd}
   table.info tr:hover td{background:#f7f9fc}
   table.info td.num{white-space:nowrap}
@@ -88,12 +118,12 @@
   table.info a{color:#1f6feb;text-decoration:none}
   table.info a:hover{text-decoration:underline}
   /* footer */
-  #foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:10px 14px;
+  #foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:11px 24px;
         border-top:1px solid #eee;background:#fff;z-index:20}
-  #foot a{font-size:16px;color:#555;text-decoration:none}
+  #foot a{font-size:17px;color:#555;text-decoration:none}
   #foot a:hover{text-decoration:underline;color:#222}
 </style></head><body>
-<!-- Single-run data is injected into the block below by `qa dashboard`; on the
+<!-- Single-run data is injected into the block below by `vqb view`; on the
      committed site the placeholder stays put, JSON.parse fails, and we go global. -->
 <script type="application/json" id="embedded">__EMBED__</script>
 
@@ -101,67 +131,60 @@
 <p id="tagline">a composable vector quantization framework</p>
 
 <section id="about">
-  <p><b>VQ-bench</b> is an open benchmark and harness for vector quantization algorithms. It implements several primitives in Rust and builds quantizers by composing these primitives. It supports several high-dimensional embedding datasets and measures how different quantizers trade off <i>size</i> (e.g., bits-per-dimension, encoding memory) against
-  <i>quality</i> (e.g., reconstruction error, recall). VQ-bench reports these metrics side-by-side and lets you explore the trade-offs directly. The goal is for it to eventually provide an open-source, reproducible comparison of existing quantization algorithms and a testbed for designing new quantization algorithms.
-  
+  <p><b>VQ-bench</b> is an open-source benchmark and framework for vector quantization. It implements several algorithmic primitives and builds quantizers by composing these primitives. We evaluate the performance of existing quantizers on several size and quality metrics and we publish the results on this page. </p>
+
   <details>
     <summary>Quantizers</summary>
-    <p>Each method evaluated in VQ-bench, with a link to its source. Colors match the plot series.</p>
-    <table class="info"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
+    <p>Each method evaluated in VQ-bench, with a link to its source.</p>
+    <table class="info wide-first"><thead><tr><th>Quantizer</th><th>Paper</th><th>Year</th></tr></thead>
     <tbody id="refbody"></tbody></table>
-    <p class="note">Scalar and MinMax are uniform min–max baselines (per-coordinate and per-vector, respectively) with no dedicated reference.</p>
+    <p class="note">MinMax (per-vector) and Scalar (per-dimension) are uniform min–max quantization baselines with no dedicated reference.</p>
   </details>
   <details>
     <summary>Datasets</summary>
     <table class="info">
-      <thead><tr><th>Dataset</th><th>Embedding model / dim</th><th>Vectors</th><th>Calibration queries</th></tr></thead>
+      <thead><tr><th>Dataset</th><th>Vectors</th><th>Dimension</th><th>Calibration queries</th></tr></thead>
       <tbody>
-        <tr><td>ArXiv</td><td><code>nomic</code> / 768</td><td class="num">1,344,643</td><td class="num">0</td></tr>
-        <tr><td>CCNews</td><td><code>nomic</code> / 768</td><td class="num">495,328</td><td class="num">0</td></tr>
-        <tr><td>Yahoo</td><td><code>MiniLM</code> / 384</td><td class="num">677,305</td><td class="num">0</td></tr>
-        <tr><td>COCO</td><td><code>nomic</code> / 768</td><td class="num">282,360</td><td class="num">114,054</td></tr>
-        <tr><td>LAION</td><td><code>CLIP</code> / 512</td><td class="num">1,000,448</td><td class="num">999,448</td></tr>
+        <tr><td>ArXiv</td><td class="num">1,344,643</td><td class="num">768</td><td class="num">0</td></tr>
+        <tr><td>CCNews</td><td class="num">495,328</td><td class="num">768</td><td class="num">0</td></tr>
+        <tr><td>Yahoo</td><td class="num">677,305</td><td class="num">384</td><td class="num">0</td></tr>
+        <tr><td>COCO</td><td class="num">282,360</td><td class="num">768</td><td class="num">114,054</td></tr>
+        <tr><td>LAION</td><td class="num">1,000,448</td><td class="num">512</td><td class="num">999,448</td></tr>
       </tbody>
     </table>
-    <p class="note">All datasets are from <a href="https://arxiv.org/abs/2505.17810" target="_blank" rel="noopener">VIBE</a> (Jääsääri et al. 2025) and use dot-product similarity. <b>Calibration queries</b> is the number of available sample queries for training.
-  </details>
-  <details>
-    <summary>Experiments</summary>
-    <p style="line-height:1.55;color:#444;margin:0">Two experiments
-    are available in the selector.
-  
-    <b>benchmark</b> displays the results from running each quantizer across all datasets.
-    <b>whitening-ablation</b> is a proof-of-concept experiment that takes advantage of the compositional interface of VQ-bench. It investigates whether <em>whitening</em> (making the query distribution isotropic via SVD) improves quantization performance. It applies only to datasets with calibration queries, and leads to improvements on COCO but regressions on LAION.
+    <p class="note">All datasets are from <a href="https://vector-index-bench.github.io" target="_blank" rel="noopener">VIBE</a> (Jääsääri et al. 2025) and use inner-product similarity. <b>Calibration queries</b> is the number of available sample queries for training.</p>
   </details>
   <details>
     <summary>Metrics</summary>
-    <table class="info">
+    <table class="info wide-first">
       <thead><tr><th>Metric</th><th>What it measures</th><th>Better</th></tr></thead>
       <tbody>
-        <tr class="grp"><td colspan="3">KV-cache values · signal compression</td></tr>
-        <tr><td><b>reconstruction MSE</b></td><td>Average squared distance between the true vector and the reconstructed vector.</td><td>lower</td></tr>
-        <tr><td><b>reconstruction bias</b></td><td>Squared norm of the average residual vector (true vector &minus; approximated vector).</td><td>lower</td></tr>
+        <tr class="grp"><td colspan="3">KV-cache values / signal compression</td></tr>
+        <tr><td><b>reconstruction MSE</b></td><td>average squared distance between the true vector and the reconstructed vector</td><td>lower</td></tr>
+        <tr><td><b>reconstruction bias</b></td><td>squared norm of the average residual vector (true vector &minus; approximated vector)</td><td>lower</td></tr>
         <tr class="grp"><td colspan="3">Model weights compression</td></tr>
-        <tr><td><b>score MSE</b></td><td>Average squared error of the inner-product estimates between queries and candidates.</td><td>lower</td></tr>
-        <tr><td><b>score bias</b></td><td>Bias of the inner-product estimates.</td><td>→ 0</td></tr>
-        <tr class="grp"><td colspan="3">Vector search · recommendations</td></tr>
-        <tr><td><b>recall@k</b></td><td>Fraction of the true top-k neighbors recovered contained in the approximated top-k.</td><td>higher</td></tr>
-        <tr><td><b>SOS<sub>k</sub> (sum of top scores)</b></td><td>Ratio of summed top-k approximated scores and summed true top-k scores.</td><td>higher</td></tr>
-        <tr class="grp"><td colspan="3">KV-cache keys · softmax model layers</td></tr>
-        <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax (i.e., attention) distributions induced by true and approximate candidate scores, at temperature τ.</td><td>lower</td></tr>
-        <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax (i.e., attention) distributions, at temperature τ.</td><td>lower</td></tr>
+        <tr><td><b>score MSE</b></td><td>average squared error of the inner-product estimates between queries and candidates</td><td>lower</td></tr>
+        <tr><td><b>score bias</b></td><td>bias of the inner-product estimates</td><td>→ 0</td></tr>
+        <tr class="grp"><td colspan="3">Vector search / recommendations</td></tr>
+        <tr><td><b>recall@k</b></td><td>fraction of the true top-k neighbors contained in the approximated top-k</td><td>higher</td></tr>
+        <tr><td><b>SOS@k</b></td><td>ratio of summed top-k approximated scores and summed true top-k scores</td><td>higher</td></tr>
+        <tr><td><b>exp-SOS@k (τ)</b></td><td>SOS@k over exponentiated scores exp(score / τ), at temperature τ</td><td>higher</td></tr>
+        <tr class="grp"><td colspan="3">KV-cache keys</td></tr>
+        <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax distributions induced by true and approximate candidate scores, at temperature τ</td><td>lower</td></tr>
+        <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ</td><td>lower</td></tr>
       </tbody>
     </table>
-    <p class="note">We also report size and cost metrics (bits per dimension, peak / encode memory, encode / scoring time). Softmax metrics are reported at temperatures τ ∈ {0.5, 1, 2}; recall and SOS at k ∈ {1, 10, 50}.</p>
+    <p class="note">We also report size and efficiency metrics (bits per dimension, peak / encode memory, encode / scoring time). All time and memory statistics were measured on an Apple M2 Pro with 16GB RAM using 6 threads.</p>
   </details>
-  <p style="margin-top:16px;padding-top:12px;border-top:1px solid #eee"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is maintained by Amir Ingber and Edo Liberty (<a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a>) and Ashwin Padaki (University of Pennsylvania). The code will become open source in late July 2026.</p>
+  <p style="margin-top:16px;padding-top:12px"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is actively maintained by Amir Ingber, Edo Liberty (Pinecone), and Ashwin Padaki (UPenn).</p>
 </section>
 
 <hr id="sep">
 
-<h1 id="title">vq-bench</h1>
+<h2 id="benchhead">Benchmarking Results</h2>
+<h1 id="title">VQ-bench</h1>
 <div id="top">
-  <div class="ctl" id="expctl"><label>experiment</label><select id="expsel"></select></div>
+  <div class="ctl" id="runctl"><label>run</label><select id="runsel"></select></div>
   <div class="ctl"><label>dataset</label><select id="dssel"></select></div>
   <span id="status"></span>
 </div>
@@ -181,6 +204,7 @@
     <div class="ctl"><label>group</label><select id="gsel">
       <option value="family">family</option><option value="method">method</option></select></div>
     <div class="ctl"><label>filter</label><input type="text" id="q" placeholder="e.g. PQ, EDEN, B=4"></div>
+    <div class="ctl"><span class="chk"><input type="checkbox" id="autoscale"><label for="autoscale">autoscale</label></span></div>
     <div class="ctl" id="dlbtns">
       <button id="btn-link">copy link</button>
       <button id="btn-png">download plot (png)</button>
@@ -198,7 +222,13 @@
 </section>
 
 <section id="tab-table" hidden>
-  <input id="tq" placeholder="filter (e.g. PQ, EDEN, B=4)…">
+  <div id="tbar">
+    <input id="tq" placeholder="filter (e.g. PQ, EDEN, B=4)…">
+    <div id="colwrap">
+      <button id="colbtn" type="button">columns ▾</button>
+      <div id="colpop" hidden><div id="collist"></div></div>
+    </div>
+  </div>
   <table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table>
 </section>
 
@@ -210,19 +240,20 @@ const COLORS = {
   // RaBitQ family — oranges
   "RaBitQ":"#e6550d", "E-RaBitQ":"#fdae6b",
   // EDEN family — greens
-  "EDEN-biased":"#238b45", "EDEN-unbiased":"#74c476",
+  "EDEN-MSE":"#238b45", "EDEN-prod":"#74c476",
   // TurboQuant family — purples
   "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
+  // product-quantization & learned-rotation family — blues
+  "PQ":"#08306b", "ITQ":"#3182bd", "ITQ-asym":"#6baed6", "OPQ":"#08519c",
   // singletons — distinct hues
-  "PQ":"#000000",      // black
   "SimHash":"#008b8b", // dark teal
   "QJL":"#bcbd22",     // olive
   "NF4":"#8c564b",     // brown
   "KIVI":"#fb9a99",    // salmon
   "GEAR":"#7f7f7f",    // gray
   "Int":"#e7298a",     // magenta-pink
-  "Scalar":"#d62728",  // red
-  "MinMax":"#bf9000",  // gold
+  // baselines — grays
+  "Scalar":"#6e6e6e", "MinMax":"#a6a6a6",
 };
 // Fallback for any future family not listed above — broadened so new methods
 // don't immediately collide.
@@ -244,33 +275,38 @@ const FIELDS = {
   recon_us: {group:"Time",          label:"reconstruction time (µs)",log:false, get:r=>r.recon_us,  d3:".2f"},
   recall:   {group:"Quality",       label:"recall@k",                log:false, perK:true, get:(r,k)=>r.recalls[k], d3:".4f"},
   sos:      {group:"Quality",       label:"SOS@k (score ratio)",     log:false, perK:true, get:(r,k)=>r.sos[k],     d3:".4f"},
+  exp_sos:  {group:"Quality",       label:"exp-SOS@k (τ={t})",       log:false, perKT:true, get:(r,k,t)=>r.exp_sos?.[t]?.[k], d3:".4f"},
   mse:      {group:"Quality",       label:"score MSE",               log:true,  get:r=>r.mse,       d3:".2e"},
   bias:     {group:"Quality",       label:"score bias",              log:false, get:r=>r.bias,      d3:".2e"},
-  exp:      {group:"Quality",       label:"score exp-MSE@{t}",       log:true,  perT:true, get:(r,t)=>r.exp[t], d3:".2e"},
   kl:       {group:"Quality",       label:"attention KL (τ={t})", log:true,  perT:true, get:(r,t)=>r.kl[t],  d3:".2e"},
-  l1:       {group:"Quality",       label:"attention TV (τ={t})", log:false, perT:true, get:(r,t)=>r.l1[t]/2,  d3:".4f"},
+  l1:       {group:"Quality",       label:"attention TV (τ={t})", log:false, perT:true, get:(r,t)=>r.l1[t],  d3:".4f"},
   recon:    {group:"Quality",       label:"reconstruction MSE",      log:true,  get:r=>r.recon,     d3:".2e"},
   recon_bias:{group:"Quality",      label:"reconstruction bias",     log:true,  get:r=>r.recon_bias,d3:".2e"},
 };
-const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","mse","bias","exp","kl","l1","recon","recon_bias"];
+const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","exp_sos","mse","bias","kl","l1","recon","recon_bias"];
 const GROUP_ORDER = ["Size & memory","Time","Quality"];
 
 function family(label){ const p=label.split(/\s+/); return p.length?p[0]:label; }
 
-// One dataset block ({dataset, sim, methods:[...]}) + experiment meta (ks,
-// temperatures) → per-method records the views expect.
+// One dataset block ({dataset, sim, methods:[...]}) + run meta (k,
+// temp) → per-method records the views expect.
 function parseDataset(block, meta){
-  const ks = ((meta && meta.ks) || []).slice().sort((a,b)=>a-b);
-  const tset = new Set(((meta && meta.temperatures) || []).map(Number));
-  let hasSos = false;
+  const ks = ((meta && meta.k) || []).slice().sort((a,b)=>a-b);
+  const tset = new Set(((meta && meta.temp) || []).map(Number));
+  let hasSos = false, hasExpSos = false;
   const rows = (block.methods || []).map(d=>{
     const su = d.score_us || {};
-    const recalls = {}, sos = {}, exp = {}, kl = {}, l1 = {};
+    const recalls = {}, sos = {}, kl = {}, l1 = {};
     for(const [k,v] of Object.entries(d.recalls || {})) recalls[+k] = v;
     for(const [k,v] of Object.entries(d.sos || {})) { sos[+k] = v; hasSos = true; }
-    for(const [t,v] of Object.entries(d.score_exp_mse || {})) { exp[+t] = v; tset.add(+t); }
     for(const [t,v] of Object.entries(d.score_kl || {}))      { kl[+t]  = v; tset.add(+t); }
-    for(const [t,v] of Object.entries(d.score_l1 || {}))      { l1[+t]  = v; tset.add(+t); }
+    for(const [t,v] of Object.entries(d.score_tv || {}))      { l1[+t]  = v; tset.add(+t); }
+    const exp_sos = {};
+    for(const [t,ks_] of Object.entries(d.exp_sos || {})){
+      exp_sos[+t] = {};
+      for(const [k,v] of Object.entries(ks_)){ exp_sos[+t][+k] = v; hasExpSos = true; }
+      tset.add(+t);
+    }
     return {
       method:d.label, family:family(d.label),
       bits: d.bits_per_dim ?? null,
@@ -282,16 +318,17 @@ function parseDataset(block, meta){
       score_avg: su.avg ?? null, score_p50: su.p50 ?? null,
       score_p90: su.p90 ?? null, score_p99: su.p99 ?? null,
       recon_us: d.recon_us ?? null,
-      mse: d.mse_score ?? null, bias: d.score_bias ?? null,
-      exp, kl, l1, recon: d.recon_mse ?? null, recon_bias: d.recon_bias ?? null,
-      recalls, sos,
+      mse: d.mse_score ?? null, bias: d.bias_score ?? null,
+      kl, l1, recon: d.mse_recon ?? null, recon_bias: d.bias_recon ?? null,
+      recalls, sos, exp_sos,
     };
   });
   const temps = [...tset].sort((a,b)=>a-b);
-  return { rows, ks, temps, hasSos };
+  return { rows, ks, temps, hasSos, hasExpSos };
 }
 
 let DATA = null, famColor = {}, curFname = "vq-bench";
+let AUTOSCALE = false;          // persistent axis-autoscale toggle; survives dataset/metric switches
 let hiddenSeries = new Set();   // series names currently toggled off
 let plotSeries = [];            // ordered {name,color,dashed,square}, aligned to plot trace order
 let panelSig = "";              // signature of the panel's series set; rebuild only when it changes
@@ -358,7 +395,8 @@ function availFields(){
   for(const r of DATA.rows){
     for(const f of FIELD_ORDER){
       const fd = FIELDS[f];
-      const v = fd.perK ? (k0!=null ? fd.get(r,k0) : null)
+      const v = fd.perKT ? (k0!=null && t0!=null ? fd.get(r,k0,t0) : null)
+              : fd.perK ? (k0!=null ? fd.get(r,k0) : null)
               : fd.perT ? (t0!=null ? fd.get(r,t0) : null)
               : fd.get(r);
       if(v!=null) present[f]=true;
@@ -416,9 +454,10 @@ function setData(parsed){
 // Resolve an axis label, substituting the active k / temperature into per-k /
 // per-t metric names ("recall@k" → "recall@10").
 function axisTitle(field, k, t){
-  let s = FIELDS[field].label;
-  if(FIELDS[field].perK && Number.isFinite(k)) s = s.replace("@k", "@"+k);
-  if(FIELDS[field].perT && Number.isFinite(t)) s = s.replace("{t}", t);
+  const fd = FIELDS[field];
+  let s = fd.label;
+  if((fd.perK || fd.perKT) && Number.isFinite(k)) s = s.replace("@k", "@"+k);
+  if((fd.perT || fd.perKT) && Number.isFinite(t)) s = s.replace("{t}", t);
   return s;
 }
 
@@ -428,7 +467,21 @@ function axisLayout(vals, field, log, label){
     showgrid:true, gridcolor:"#e2e2e2", zeroline:false, autorange:false,
     showline:true, linecolor:"#222", linewidth:2.6, mirror:true,
     ticks:"outside", tickcolor:"#222", ticklen:8, tickwidth:2, tickfont:{size:21, weight:600, color:"#222"},
+    // Reserve room for whatever tick labels the current zoom produces, so long
+    // labels never clip or collide with the axis title (Plotly keeps them at a
+    // distinct precision; we don't cap it, which would make ticks all-identical).
+    automargin:true,
   };
+  // Persistent autoscale: hand ranging to Plotly (keep log formatting) and skip
+  // the computed fixed ranges below, so it stays on across dataset/metric switches.
+  if(AUTOSCALE){
+    ax.autorange = true;
+    if(log){
+      ax.type = "log"; ax.dtick = 1; ax.exponentformat = "power"; ax.showexponent = "all";
+      ax.minor = {showgrid:true, gridcolor:"#f0f0f0", ticks:"outside", ticklen:4, tickwidth:1.4, tickcolor:"#999"};
+    }
+    return ax;
+  }
   const v = vals.filter(x=>x!=null && (!log || x>0));
   if(field==="recall" && !log){ ax.range=[0,1.02]; return ax; }
   if(!v.length){ ax.autorange=true; return ax; }
@@ -455,12 +508,12 @@ function redraw(){
   const xlog=document.getElementById("xlog").checked, ylog=document.getElementById("ylog").checked;
   const grp=document.getElementById("gsel").value;
   const filt=document.getElementById("q").value.toLowerCase();
-  const isPerK = (FIELDS[xf].perK || FIELDS[yf].perK);
-  const isPerT = (FIELDS[xf].perT || FIELDS[yf].perT);
+  const isPerK = (FIELDS[xf].perK || FIELDS[yf].perK || FIELDS[xf].perKT || FIELDS[yf].perKT);
+  const isPerT = (FIELDS[xf].perT || FIELDS[yf].perT || FIELDS[xf].perKT || FIELDS[yf].perKT);
   document.getElementById("ksel").disabled = !isPerK;
   document.getElementById("tsel").disabled = !isPerT;
 
-  const acc = (f,r) => FIELDS[f].perK ? FIELDS[f].get(r,k) : FIELDS[f].perT ? FIELDS[f].get(r,t) : FIELDS[f].get(r);
+  const acc = (f,r) => FIELDS[f].perKT ? FIELDS[f].get(r,k,t) : FIELDS[f].perK ? FIELDS[f].get(r,k) : FIELDS[f].perT ? FIELDS[f].get(r,t) : FIELDS[f].get(r);
   const gx = r => acc(xf,r);
   const gy = r => acc(yf,r);
   const ok = (x,y) => x!=null && y!=null && (!xlog||x>0) && (!ylog||y>0);
@@ -511,11 +564,32 @@ function redraw(){
   curFname = `vq-bench-${yf}-vs-${xf}`;
   Plotly.react("fig", traces, layout, {
     responsive:true, displaylogo:false, displayModeBar:"hover",
-    modeBarButtonsToRemove:["toImage","select2d","lasso2d"],      // downloads live in the toolbar buttons
+    modeBarButtonsToRemove:["toImage","select2d","lasso2d","resetScale2d"],   // downloads + reset live elsewhere; autoscale is our own toggle
   });
+  bindAutoscaleSync();
   plotSeries = seriesMeta;
   syncLegendPanel(seriesMeta);
   writeURL();
+}
+
+// Keep the autoscale checkbox in sync with the plot's real range state. A manual
+// zoom/pan writes explicit ranges (autoscale effectively off) → uncheck it; a
+// double-click / Plotly autoscale writes autorange:true → check it. Bound once;
+// the handler survives Plotly.react re-renders on the same #fig div.
+let autoscaleBound = false;
+function bindAutoscaleSync(){
+  if(autoscaleBound) return;
+  const gd = document.getElementById("fig");
+  if(!gd || !gd.on) return;
+  gd.on("plotly_relayout", ev => {
+    const keys = Object.keys(ev || {});
+    const cb = document.getElementById("autoscale");
+    const manual = keys.some(k => /\.range(\[|$)/.test(k));           // zoom/pan set an explicit range
+    const auto   = keys.some(k => /\.autorange$/.test(k)) && keys.every(k => !/\.range(\[|$)/.test(k));
+    if(manual && AUTOSCALE){ AUTOSCALE = false; cb.checked = false; }
+    else if(auto && !AUTOSCALE){ AUTOSCALE = true; cb.checked = true; }
+  });
+  autoscaleBound = true;
 }
 
 // ── HTML legend / series-toggle panel ───────────────────────────────────────────
@@ -601,20 +675,29 @@ const TABLE_METRICS = [
   ["score_p90","score p90 (µs)",  "num2", r=>r.score_p90],
   ["score_p99","score p99 (µs)",  "num2", r=>r.score_p99],
   ["recon_us", "recon (µs)",      "num2", r=>r.recon_us],
-  ["mse",      "MSE",             "sci",  r=>r.mse],
-  ["bias",     "bias",            "sci",  r=>r.bias],
+  ["mse",      "score MSE",             "sci",  r=>r.mse],
+  ["bias",     "score bias",            "sci",  r=>r.bias],
   ["recon",    "recon MSE",       "sci",  r=>r.recon],
   ["recon_bias","recon bias",     "sci",  r=>r.recon_bias],
 ];
-let TCOLS = [], tSortKey = null, tSortDir = 1;
+// Column model: `method` is pinned first; every other available column lives in
+// `colOrder` (display order) and shows iff it's in `colShown`. The "columns"
+// popover toggles + drag-reorders them. State persists across dataset switches.
+const METHOD_COL = {key:"method", label:"Method", kind:"text", get:r=>r.method};
+let tSortKey = null, tSortDir = 1;
+let colDefs = [];             // available non-method cols for the current DATA
+let colOrder = [];            // keys of colDefs, in display order
+let colShown = new Set();     // keys currently visible
+let tableSeeded = false;      // seed the compact default once
+let dragKey = null;           // key being dragged in the picker
 
 function tg(t){ return Number.isInteger(t) ? String(t) : String(t); } // "1","0.5","2"
 
-function buildTableCols(){
+// Every column the current data can show (excluding the pinned Method column).
+function availableCols(){
   const rows = DATA.rows;
   const any = get => rows.some(r => get(r) != null);
   const cols = [
-    {key:"method", label:"Method", kind:"text", get:r=>r.method},
     {key:"family", label:"Family", kind:"fam",  get:r=>r.family},
     {key:"bits",   label:"bits/dim", kind:"num3", get:r=>r.bits},
   ];
@@ -622,10 +705,39 @@ function buildTableCols(){
   if(any(r=>r.code_bits!=null))  cols.push({key:"code_bits",  label:"code b/d",  kind:"num3", get:r=>r.code_bits});
   for(const [key,label,kind,get] of TABLE_METRICS) if(any(get)) cols.push({key,label,kind,get});
   for(const t of DATA.temps) if(any(r=>r.kl[t]!=null))  cols.push({key:`kl@${t}`, label:`attn KL (τ=${tg(t)})`, kind:"sci",get:r=>r.kl[t]});
-  for(const t of DATA.temps) if(any(r=>r.l1[t]!=null))  cols.push({key:`l1@${t}`, label:`attn TV (τ=${tg(t)})`, kind:"num3",get:r=>r.l1[t]/2});
+  for(const t of DATA.temps) if(any(r=>r.l1[t]!=null))  cols.push({key:`l1@${t}`, label:`attn TV (τ=${tg(t)})`, kind:"num3",get:r=>r.l1[t]});
   for(const k of DATA.ks) cols.push({key:`r${k}`, label:`R@${k}`, kind:"recall", get:r=>r.recalls[k]});
   if(DATA.hasSos) for(const k of DATA.ks) cols.push({key:`s${k}`, label:`SOS@${k}`, kind:"recall", get:r=>r.sos[k]});
+  if(DATA.hasExpSos) for(const k of DATA.ks) for(const t of DATA.temps) cols.push({key:`es${k}@${t}`, label:`expSOS@${k} (τ=${tg(t)})`, kind:"recall", get:r=>r.exp_sos?.[t]?.[k]});
   return cols;
+}
+
+// A compact default: bits/dim, recall@10 (or the smallest k), score MSE, recon MSE.
+function defaultShown(defs){
+  const on = [], has = k => defs.some(c=>c.key===k);
+  if(has("bits")) on.push("bits");
+  const rKeys = defs.filter(c=>/^r\d+$/.test(c.key)).map(c=>c.key);
+  if(rKeys.includes("r10")) on.push("r10"); else if(rKeys.length) on.push(rKeys[0]);
+  if(has("mse"))   on.push("mse");
+  if(has("recon")) on.push("recon");
+  return on;
+}
+
+// Refresh the column set for the current DATA, keeping the user's order/visibility
+// for columns that still exist and appending any newly-available ones (hidden).
+function reconcileCols(){
+  colDefs = availableCols();
+  const avail = colDefs.map(c=>c.key);
+  colOrder = colOrder.filter(k=>avail.includes(k));
+  for(const k of avail) if(!colOrder.includes(k)) colOrder.push(k);
+  if(!tableSeeded){ colShown = new Set(defaultShown(colDefs)); tableSeeded = true; }
+  else for(const k of [...colShown]) if(!avail.includes(k)) colShown.delete(k);
+}
+
+// The visible columns, in order: Method first, then the shown columns.
+function shownCols(){
+  const byKey = Object.fromEntries(colDefs.map(c=>[c.key,c]));
+  return [METHOD_COL, ...colOrder.filter(k=>colShown.has(k)).map(k=>byKey[k])];
 }
 
 function heat(v){
@@ -644,19 +756,20 @@ function fmt(v,kind){
 }
 function tableHeader(){
   const hr=document.getElementById("hr"); hr.innerHTML="";
-  for(const c of TCOLS){
+  for(const c of shownCols()){
     const th=document.createElement("th");
     th.className = c.key==="method"?"method":"";
     const arr = tSortKey===c.key ? (tSortDir>0?"▲":"▼") : "";
     th.innerHTML = c.label + ` <span class="arr">${arr}</span>`;
-    th.onclick=()=>{ if(tSortKey===c.key) tSortDir=-tSortDir; else {tSortKey=c.key; tSortDir=(c.kind==="text"||c.kind==="fam")?1:-1;} tableRender(); };
+    th.onclick=()=>{ if(tSortKey===c.key) tSortDir=-tSortDir; else {tSortKey=c.key; tSortDir=(c.kind==="text"||c.kind==="fam")?1:-1;} drawTable(); };
     hr.appendChild(th);
   }
 }
 function tableRender(){
+  const cols = shownCols();
   const f=document.getElementById("tq").value.toLowerCase();
   let rs=DATA.rows.filter(r=> r.method.toLowerCase().includes(f) || r.family.toLowerCase().includes(f));
-  const col = TCOLS.find(c=>c.key===tSortKey);
+  const col = cols.find(c=>c.key===tSortKey);
   if(col){
     rs.sort((a,b)=>{
       let x=col.get(a), y=col.get(b);
@@ -668,7 +781,7 @@ function tableRender(){
   const tb=document.getElementById("tb"); tb.innerHTML="";
   for(const r of rs){
     const tr=document.createElement("tr");
-    for(const c of TCOLS){
+    for(const c of cols){
       const td=document.createElement("td");
       if(c.key==="method"){ td.className="method"; td.innerHTML=`<span class="dot" style="background:${famColor[r.family]}"></span>${r.method}`; }
       else if(c.key==="family"){ td.className="fam"; td.textContent=r.family; }
@@ -678,10 +791,39 @@ function tableRender(){
     tb.appendChild(tr);
   }
 }
-function buildTable(){ TCOLS = buildTableCols(); tableHeader(); tableRender(); }
+function drawTable(){ tableHeader(); tableRender(); }
 
-// ── render: an experiment, one dataset at a time ────────────────────────────────
-let CURRENT_EXP = null;
+// The column picker: one draggable, checkbox row per available column, in
+// display order. Toggle = show/hide; drag = reorder. Rebuilds table live.
+function buildColPicker(){
+  const list=document.getElementById("collist"); list.innerHTML="";
+  const byKey = Object.fromEntries(colDefs.map(c=>[c.key,c]));
+  for(const key of colOrder){
+    const c=byKey[key]; if(!c) continue;
+    const row=document.createElement("div");
+    row.className="colrow"; row.draggable=true; row.dataset.key=key;
+    row.innerHTML=`<span class="grip">⠿</span><input type="checkbox" ${colShown.has(key)?"checked":""}><span class="lbl">${c.label}</span>`;
+    const cb=row.querySelector("input");
+    cb.onclick=e=>e.stopPropagation();
+    cb.onchange=()=>{ if(cb.checked) colShown.add(key); else colShown.delete(key); drawTable(); };
+    row.addEventListener("dragstart",e=>{ dragKey=key; row.classList.add("drag"); e.dataTransfer.effectAllowed="move"; });
+    row.addEventListener("dragend",()=>row.classList.remove("drag"));
+    row.addEventListener("dragover",e=>e.preventDefault());
+    row.addEventListener("drop",e=>{ e.preventDefault(); reorderCols(dragKey, key); });
+    list.appendChild(row);
+  }
+}
+function reorderCols(from,to){
+  if(!from || from===to) return;
+  const a=colOrder.filter(k=>k!==from);
+  a.splice(a.indexOf(to), 0, from);
+  colOrder=a;
+  buildColPicker(); drawTable();
+}
+function buildTable(){ reconcileCols(); drawTable(); buildColPicker(); }
+
+// ── render: a run, one dataset at a time ────────────────────────────────
+let CURRENT_RUN = null;
 
 // Pretty header: "ArXiv · 1,344,643 vectors · 768 dimensions". Name is the
 // dataset id (first hyphen token) prettified; dim falls back to the digits in
@@ -692,8 +834,9 @@ function datasetHeader(block){
   const id = String(block.dataset || "").split("-")[0];
   const name = DS_NAMES[id] || (id ? id[0].toUpperCase()+id.slice(1) : block.dataset);
   const dim = block.dim ?? (String(block.dataset||"").match(/-(\d+)-/)||[])[1];
+  const nvec = block.n_base ?? block.db_size;
   const meta = [];
-  if(block.db_size != null) meta.push(`${Number(block.db_size).toLocaleString()} vectors`);
+  if(nvec != null) meta.push(`${Number(nvec).toLocaleString()} vectors`);
   if(dim != null) meta.push(`${dim} dimensions`);
   const metaText = meta.join(" · ");
   const html = `<strong>${name}</strong>` + (metaText ? ` <span class="meta">· ${metaText}</span>` : "");
@@ -702,28 +845,32 @@ function datasetHeader(block){
 }
 
 function renderDataset(idx){
-  const exp = CURRENT_EXP; if(!exp || !exp.datasets || !exp.datasets[idx]) return;
-  const block = exp.datasets[idx];
+  const run = CURRENT_RUN; if(!run || !run.datasets || !run.datasets[idx]) return;
+  const block = run.datasets[idx];
   curDsId = String(block.dataset);
-  setData(parseDataset(block, exp.meta || {}));
+  setData(parseDataset(block, run.meta || {}));
   buildTable();
   const h = datasetHeader(block);
   document.getElementById("title").innerHTML = h.html;
   document.title = "VQ-bench · " + h.text;
 }
 
-function loadExperiment(exp){
-  CURRENT_EXP = exp;
+function loadRun(run){
+  CURRENT_RUN = run;
   const dssel = document.getElementById("dssel");
   dssel.innerHTML = "";
-  (exp.datasets || []).forEach((d,i)=>{
+  (run.datasets || []).forEach((d,i)=>{
     const o=document.createElement("option"); o.value=i;
-    o.textContent=`${d.dataset} · ${d.sim} · ${d.db_size}`; dssel.appendChild(o);
+    const nvec = d.n_base ?? d.db_size;
+    const parts = [d.dataset];
+    if(nvec != null) parts.push(`${Number(nvec).toLocaleString()} vectors`);
+    if(d.dim != null) parts.push(`${d.dim}d`);
+    o.textContent = parts.join(" · "); dssel.appendChild(o);
   });
   dssel.onchange = ()=> renderDataset(+dssel.value);
-  if((exp.datasets||[]).length){
+  if((run.datasets||[]).length){
     let dsIdx = 0;
-    if(pendingURL.ds){ const j=(exp.datasets||[]).findIndex(d=>String(d.dataset)===pendingURL.ds); if(j>=0) dsIdx=j; }
+    if(pendingURL.ds){ const j=(run.datasets||[]).findIndex(d=>String(d.dataset)===pendingURL.ds); if(j>=0) dsIdx=j; }
     dssel.value = dsIdx;
     renderDataset(dsIdx);
   }
@@ -733,29 +880,22 @@ function loadExperiment(exp){
 // ── References tab (static) ──────────────────────────────────────────────────────
 // Colors match the plot series: COLORS[name] where defined, else the same
 // PALETTE color assignColors() hands out in benchmark.json family order.
+// One row per *implemented* quantizer; add a row here as each method lands.
 const REFS = [
-  {n:"RaBitQ",          c:"#e6550d", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for ANN", u:"https://doi.org/10.1145/3654970"},
-  {n:"E-RaBitQ",        c:"#fdae6b", y:2025, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors (Extended RaBitQ)", u:"https://arxiv.org/abs/2409.09913"},
-  {n:"PQ",              c:"#000000", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
-  {n:"OPQ",             c:"#393b79", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
-  {n:"SimHash",         c:"#008b8b", y:2002, t:"Similarity Estimation Techniques from Rounding Algorithms", u:"https://doi.org/10.1145/509907.509965"},
-  {n:"ITQ",             c:"#637939", y:2013, t:"Iterative Quantization: A Procrustean Approach to Learning Binary Codes", u:"https://doi.org/10.1109/TPAMI.2012.193"},
-  {n:"ITQ-asym",        c:"#8c6d31", y:2014, t:"Asymmetric Distances for Binary Embeddings", u:"https://doi.org/10.1109/TPAMI.2013.101"},
-  {n:"QJL",             c:"#bcbd22", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
-  {n:"EDEN-biased",     c:"#238b45", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
-  {n:"EDEN-unbiased",   c:"#74c476", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"MinMax",          c:"#a6a6a6", y:null, t:"Uniform per-vector min–max baseline", u:null},
+  {n:"Scalar",          c:"#6e6e6e", y:null, t:"Per-dimension min–max scalar quantization baseline", u:null},
+  {n:"EDEN-MSE",        c:"#238b45", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
+  {n:"EDEN-prod",       c:"#74c476", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
   {n:"TurboQuant-MSE",  c:"#6a51a3", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
   {n:"TurboQuant-prod", c:"#9e9ac8", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
-  {n:"QuIP",            c:"#843c39", y:2023, t:"QuIP: 2-Bit Quantization of Large Language Models With Guarantees", u:"https://proceedings.neurips.cc/paper_files/paper/2023/file/0df38cd13520747e1e64e5b123a78ef8-Paper-Conference.pdf"},
-  {n:"QuIP#",           c:"#7b4173", y:2024, t:"QuIP#: Even Better LLM Quantization with Hadamard Incoherence and Lattice Codebooks", u:"https://arxiv.org/abs/2402.04396"},
-  {n:"GPTQ",            c:"#5254a3", y:2023, t:"OPTQ (GPTQ): Accurate Quantization for Generative Pre-trained Transformers", u:"https://openreview.net/forum?id=tcbBPnfwxS"},
-  {n:"QuaRot",          c:"#8ca252", y:2024, t:"QuaRot: Outlier-Free 4-bit Inference in Rotated LLMs", u:"https://arxiv.org/abs/2404.00456"},
-  {n:"NF4",             c:"#8c564b", y:2023, t:"QLoRA: Efficient Finetuning of Quantized LLMs (NF4 data type)", u:"https://arxiv.org/abs/2305.14314"},
-  {n:"KIVI",            c:"#fb9a99", y:2024, t:"KIVI: A Tuning-Free Asymmetric 2-bit Quantization for KV Cache", u:"https://arxiv.org/abs/2402.02750"},
-  {n:"GEAR",            c:"#7f7f7f", y:2024, t:"GEAR: An Efficient KV Cache Compression Recipe for Near-Lossless Generative Inference", u:"https://arxiv.org/abs/2403.05527"},
-  {n:"Int",             c:"#e7298a", y:2018, t:"Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference", u:"https://doi.org/10.1109/CVPR.2018.00286"},
-  {n:"Scalar",          c:"#d62728", y:null, t:"Uniform per-coordinate min–max baseline", u:null},
-  {n:"MinMax",          c:"#bf9000", y:null, t:"Uniform per-vector min–max baseline", u:null},
+  {n:"RaBitQ",          c:"#e6550d", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2405.12497"},
+  {n:"E-RaBitQ",        c:"#fdae6b", y:2024, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2409.09913"},
+  {n:"SimHash",         c:"#008b8b", y:2002, t:"Similarity Estimation Techniques from Rounding Algorithms", u:"https://doi.org/10.1145/509907.509965"},
+  {n:"QJL",             c:"#bcbd22", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
+  {n:"ITQ",             c:"#3182bd", y:2013, t:"Iterative Quantization: A Procrustean Approach to Learning Binary Codes for Large-Scale Image Retrieval", u:"https://doi.org/10.1109/TPAMI.2012.193"},
+  {n:"ITQ-asym",        c:"#6baed6", y:2014, t:"Asymmetric Distances for Binary Embeddings", u:"https://doi.org/10.1109/TPAMI.2013.101"},
+  {n:"PQ",              c:"#08306b", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
+  {n:"OPQ",             c:"#08519c", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
 ];
 (function renderRefs(){
   const tb = document.getElementById("refbody");
@@ -786,16 +926,21 @@ const xsel=document.getElementById("xsel"), ysel=document.getElementById("ysel")
 xsel.onchange=()=>{ document.getElementById("xlog").checked=FIELDS[xsel.value].log; redraw(); };
 ysel.onchange=()=>{ document.getElementById("ylog").checked=FIELDS[ysel.value].log; redraw(); };
 for(const id of ["xlog","ylog","ksel","tsel"]) document.getElementById(id).addEventListener("change", redraw);
+document.getElementById("autoscale").addEventListener("change", e=>{ AUTOSCALE = e.target.checked; redraw(); });
 // group switches the series namespace (families ↔ methods) → reset hidden state first.
 document.getElementById("gsel").addEventListener("change", ()=>{ hiddenSeries.clear(); panelSig=""; redraw(); });
 document.getElementById("q").addEventListener("input", redraw);
 document.getElementById("tq").addEventListener("input", tableRender);
+// columns popover: toggle open, close on outside click
+const colbtn=document.getElementById("colbtn"), colpop=document.getElementById("colpop");
+colbtn.onclick=e=>{ e.stopPropagation(); colpop.hidden=!colpop.hidden; };
+document.addEventListener("click",e=>{ if(!colpop.hidden && !colpop.contains(e.target) && e.target!==colbtn) colpop.hidden=true; });
 document.getElementById("leg-all").onclick  = ()=> setAllHidden(false);
 document.getElementById("leg-none").onclick = ()=> setAllHidden(true);
 
 function loadFile(file){
   const reader = new FileReader();
-  reader.onload = e => loadExperiment(JSON.parse(e.target.result));
+  reader.onload = e => loadRun(JSON.parse(e.target.result));
   reader.readAsText(file);
 }
 // The exported image needs a native legend (the on-screen plot has none — it uses the
@@ -848,22 +993,22 @@ fig.addEventListener("dragover", e=>{ e.preventDefault(); fig.classList.add("dra
 fig.addEventListener("dragleave", ()=> fig.classList.remove("drag"));
 fig.addEventListener("drop", e=>{ e.preventDefault(); fig.classList.remove("drag"); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
 
-// ── global mode: fetch the manifest, list experiments, fetch the selected one ────
+// ── global mode: fetch the manifest, list runs, fetch the selected one ────
 function status(msg){ document.getElementById("status").textContent = msg; }
 async function enterGlobal(){
-  const sel = document.getElementById("expsel");
+  const sel = document.getElementById("runsel");
   let man;
   try { man = await (await fetch("results/manifest.json")).json(); }
-  catch { status("results/manifest.json not found — publish a run (qa publish) then serve over HTTP."); document.getElementById("expctl").style.display="none"; return; }
+  catch { status("results/manifest.json not found — publish a run (vqb publish) then serve over HTTP."); document.getElementById("runctl").style.display="none"; return; }
   const runs = (man.runs || []);
-  if(!runs.length){ status("no experiments published yet — qa publish <run.json>, then commit."); document.getElementById("expctl").style.display="none"; return; }
+  if(!runs.length){ status("no runs published yet — vqb publish <run.json>, then commit."); document.getElementById("runctl").style.display="none"; return; }
   sel.innerHTML = "";
   runs.forEach((r,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=r.name; sel.appendChild(o); });
   async function load(i){
     const r = runs[i];
     curExpName = r.name;
     status(`loading ${r.path} …`);
-    try { const exp = await (await fetch("results/"+r.path)).json(); loadExperiment(exp); status(`${runs.length} experiment(s) · ${(r.datasets||[]).length} dataset(s)`); }
+    try { const run = await (await fetch("results/"+r.path)).json(); loadRun(run); status(`${runs.length} run(s) · ${(r.datasets||[]).length} dataset(s)`); }
     catch { status(`failed to load results/${r.path}`); }
   }
   sel.onchange = ()=> load(+sel.value);
@@ -873,15 +1018,15 @@ async function enterGlobal(){
   load(startIdx);
 }
 
-// ── bootstrap: embedded single experiment, or global manifest ───────────────────
+// ── bootstrap: embedded single run, or global manifest ───────────────────
 (function(){
   if(pendingURL.tab && TABS.includes(pendingURL.tab)) selectTab(pendingURL.tab);
   const raw = document.getElementById("embedded").textContent.trim();
   let embedded = null;
   try { embedded = raw ? JSON.parse(raw) : null; } catch { embedded = null; }
   if(embedded){
-    document.getElementById("expctl").style.display = "none"; // experiment fixed in single-run mode
-    loadExperiment(embedded);
+    document.getElementById("runctl").style.display = "none"; // run fixed in single-run mode
+    loadRun(embedded);
   } else {
     enterGlobal();
   }

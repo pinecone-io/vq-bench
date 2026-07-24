@@ -1,0 +1,5 @@
+paper/
+/target
+# Local working sets: downloaded datasets and run outputs (publish to docs/results).
+/data
+/results

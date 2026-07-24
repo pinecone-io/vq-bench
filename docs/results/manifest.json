@@ -1,54 +1,32 @@
 {
-  "generated": 1781873333,
+  "generated": 1784915615,
   "runs": [
     {
-      "name": "benchmark",
-      "path": "benchmark.json",
+      "name": "july-2026",
+      "path": "july-2026.json",
       "datasets": [
         {
           "dataset": "arxiv-nomic-768-normalized",
-          "sim": "dot",
-          "db_size": 1344643
+          "n_base": 1344643
         },
         {
           "dataset": "coco-nomic-768-normalized",
-          "sim": "dot",
-          "db_size": 282360
+          "n_base": 282360
         },
         {
           "dataset": "ccnews-nomic-768-normalized",
-          "sim": "dot",
-          "db_size": 495328
+          "n_base": 495328
         },
         {
           "dataset": "yahoo-minilm-384-normalized",
-          "sim": "dot",
-          "db_size": 677305
+          "n_base": 677305
         },
         {
           "dataset": "laion-clip-512-normalized",
-          "sim": "dot",
-          "db_size": 1000448
+          "n_base": 1000448
         }
       ],
-      "timestamp": 1781825093
-    },
-    {
-      "name": "whitening-ablation",
-      "path": "whitening-ablation.json",
-      "datasets": [
-        {
-          "dataset": "coco-nomic-768-normalized",
-          "sim": "dot",
-          "db_size": 282360
-        },
-        {
-          "dataset": "laion-clip-512-normalized",
-          "sim": "dot",
-          "db_size": 1000448
-        }
-      ],
-      "timestamp": 1781825093
+      "timestamp": 1784908790
     }
   ]
 }
