@@ -374,10 +374,16 @@ function parseURL(){
 }
 // Default view when the page is opened with no query string.
 const DEFAULT_VIEW = {exp:"benchmark", ds:"arxiv-nomic-768-normalized", x:"bits", y:"sos", k:"10"};
-let pendingURL = parseURL();   // consumed once during the initial load, then cleared
-if(Object.keys(pendingURL).length === 0) pendingURL = {...DEFAULT_VIEW};
+// Whatever the URL omits falls back to the default view, which is what lets
+// writeURL leave defaults out of the address bar without changing the view a
+// link restores.
+let pendingURL = {...DEFAULT_VIEW, ...parseURL()};   // consumed during the initial load, then cleared
 let urlReady = false;          // once true, control changes are written back to the URL
 let curExpName = null, curDsId = null, currentTab = "explore";
+// The run/dataset the page lands on unprompted. Resolved from the data during
+// load (the first run in the manifest, its first dataset) rather than named
+// above, since neither is known until the manifest is fetched.
+let defExpName = null, defDsId = null;
 
 function setSelIfValid(sel, val){
   if(val!=null && [...sel.options].some(o=>o.value===val)){ sel.value = val; return true; }
@@ -385,20 +391,25 @@ function setSelIfValid(sel, val){
 }
 
 // Write the current view to the address bar (no reload). Only keys that differ
-// from their natural default are emitted, keeping shared links short.
+// from their natural default are emitted, so the default view gets a bare URL
+// with no query string at all.
 function writeURL(){
   if(!urlReady) return;
   const p = new URLSearchParams();
-  if(curExpName) p.set("exp", curExpName);
-  if(curDsId)    p.set("ds", curDsId);
+  if(curExpName && curExpName !== defExpName) p.set("exp", curExpName);
+  if(curDsId    && curDsId    !== defDsId)    p.set("ds", curDsId);
   if(currentTab!=="explore") p.set("tab", currentTab);
   const x=document.getElementById("xsel").value, y=document.getElementById("ysel").value;
-  if(x) p.set("x", x);
-  if(y) p.set("y", y);
+  if(x && x!==DEFAULT_VIEW.x) p.set("x", x);
+  if(y && y!==DEFAULT_VIEW.y) p.set("y", y);
   if(FIELDS[x]){ const c=document.getElementById("xlog").checked; if(c!==FIELDS[x].log) p.set("xlog", c?"1":"0"); }
   if(FIELDS[y]){ const c=document.getElementById("ylog").checked; if(c!==FIELDS[y].log) p.set("ylog", c?"1":"0"); }
   if(FIELDS[x] && FIELDS[y]){
-    if(FIELDS[x].perK||FIELDS[y].perK) p.set("k", document.getElementById("ksel").value);
+    // k/τ only mean anything for a per-k / per-τ metric, and only when moved off
+    // the default — otherwise the default view would carry a lone ?k=10.
+    if(FIELDS[x].perK||FIELDS[y].perK){
+      const k=document.getElementById("ksel").value; if(k!==DEFAULT_VIEW.k) p.set("k", k);
+    }
     if(FIELDS[x].perT||FIELDS[y].perT) p.set("t", document.getElementById("tsel").value);
   }
   const g=document.getElementById("gsel").value; if(g && g!=="family") p.set("g", g);
@@ -911,6 +922,7 @@ function loadRun(run){
   });
   dssel.onchange = ()=> renderDataset(+dssel.value);
   if((run.datasets||[]).length){
+    defDsId = String(run.datasets[0].dataset);
     let dsIdx = 0;
     if(pendingURL.ds){ const j=(run.datasets||[]).findIndex(d=>String(d.dataset)===pendingURL.ds); if(j>=0) dsIdx=j; }
     dssel.value = dsIdx;
@@ -1055,6 +1067,7 @@ async function enterGlobal(){
   const runs = (man.runs || []);
   if(!runs.length){ status("no runs published yet — vqb publish <run.json>, then commit."); document.getElementById("runctl").style.display="none"; return; }
   sel.innerHTML = "";
+  defExpName = runs[0].name;
   runs.forEach((r,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=r.name; sel.appendChild(o); });
   async function load(i){
     const r = runs[i];
