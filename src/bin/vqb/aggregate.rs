@@ -27,6 +27,9 @@ fn sig6_k(m: BTreeMap<usize, f64>) -> BTreeMap<usize, f64> {
 fn sig6_s(m: BTreeMap<String, f64>) -> BTreeMap<String, f64> {
     m.into_iter().map(|(k, v)| (k, sig6(v))).collect()
 }
+fn sig6_kt(m: BTreeMap<String, BTreeMap<usize, f64>>) -> BTreeMap<String, BTreeMap<usize, f64>> {
+    m.into_iter().map(|(t, ks)| (t, sig6_k(ks))).collect()
+}
 fn sig6_timing(t: &Timing) -> Timing {
     Timing {
         avg: sig6(t.avg),
@@ -72,6 +75,8 @@ pub fn method_result(
             .then(|| sig6_k(bench::recalls(&d.true_scores, &m.approx_scores, ks, seed))),
         sos: want(metrics, "sos")
             .then(|| sig6_k(bench::sos(&d.true_scores, &m.approx_scores, ks, seed))),
+        exp_sos: want(metrics, "exp_sos")
+            .then(|| sig6_kt(bench::exp_sos(&d.true_scores, &m.approx_scores, ks, temps, seed))),
         score_kl: want(metrics, "kl").then_some(sig6_s(kl)),
         score_tv: want(metrics, "tv").then_some(sig6_s(tv)),
     }

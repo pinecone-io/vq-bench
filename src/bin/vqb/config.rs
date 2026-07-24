@@ -81,6 +81,10 @@ pub const KNOWN_METRICS: &[(&str, &str)] = &[
         "sos",
         "SOS@k: sum (over all queries and top-k candidates) of approx scores divided by sum of true scores",
     ),
+    (
+        "exp_sos",
+        "exp-SOS@k: SOS@k over exponentiated scores exp(score/temp), per temperature",
+    ),
     ("mse_score", "mean squared error of the estimated scores"),
     (
         "mse_recon",

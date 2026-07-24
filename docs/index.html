@@ -166,6 +166,7 @@
         <tr class="grp"><td colspan="3">Vector search / recommendations</td></tr>
         <tr><td><b>recall@k</b></td><td>fraction of the true top-k neighbors contained in the approximated top-k</td><td>higher</td></tr>
         <tr><td><b>SOS@k</b></td><td>ratio of summed top-k approximated scores and summed true top-k scores</td><td>higher</td></tr>
+        <tr><td><b>exp-SOS@k (τ)</b></td><td>SOS@k over exponentiated scores exp(score / τ), at temperature τ</td><td>higher</td></tr>
         <tr class="grp"><td colspan="3">KV-cache keys</td></tr>
         <tr><td><b>attention KL (τ)</b></td><td>KL-divergence between the softmax distributions induced by true and approximate candidate scores, at temperature τ</td><td>lower</td></tr>
         <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ</td><td>lower</td></tr>
@@ -270,6 +271,7 @@ const FIELDS = {
   recon_us: {group:"Time",          label:"reconstruction time (µs)",log:false, get:r=>r.recon_us,  d3:".2f"},
   recall:   {group:"Quality",       label:"recall@k",                log:false, perK:true, get:(r,k)=>r.recalls[k], d3:".4f"},
   sos:      {group:"Quality",       label:"SOS@k (score ratio)",     log:false, perK:true, get:(r,k)=>r.sos[k],     d3:".4f"},
+  exp_sos:  {group:"Quality",       label:"exp-SOS@k (τ={t})",       log:false, perKT:true, get:(r,k,t)=>r.exp_sos?.[t]?.[k], d3:".4f"},
   mse:      {group:"Quality",       label:"score MSE",               log:true,  get:r=>r.mse,       d3:".2e"},
   bias:     {group:"Quality",       label:"score bias",              log:false, get:r=>r.bias,      d3:".2e"},
   kl:       {group:"Quality",       label:"attention KL (τ={t})", log:true,  perT:true, get:(r,t)=>r.kl[t],  d3:".2e"},
@@ -277,7 +279,7 @@ const FIELDS = {
   recon:    {group:"Quality",       label:"reconstruction MSE",      log:true,  get:r=>r.recon,     d3:".2e"},
   recon_bias:{group:"Quality",      label:"reconstruction bias",     log:true,  get:r=>r.recon_bias,d3:".2e"},
 };
-const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","mse","bias","kl","l1","recon","recon_bias"];
+const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","exp_sos","mse","bias","kl","l1","recon","recon_bias"];
 const GROUP_ORDER = ["Size & memory","Time","Quality"];
 
 function family(label){ const p=label.split(/\s+/); return p.length?p[0]:label; }
@@ -287,7 +289,7 @@ function family(label){ const p=label.split(/\s+/); return p.length?p[0]:label; 
 function parseDataset(block, meta){
   const ks = ((meta && meta.k) || []).slice().sort((a,b)=>a-b);
   const tset = new Set(((meta && meta.temp) || []).map(Number));
-  let hasSos = false;
+  let hasSos = false, hasExpSos = false;
   const rows = (block.methods || []).map(d=>{
     const su = d.score_us || {};
     const recalls = {}, sos = {}, kl = {}, l1 = {};
@@ -295,6 +297,12 @@ function parseDataset(block, meta){
     for(const [k,v] of Object.entries(d.sos || {})) { sos[+k] = v; hasSos = true; }
     for(const [t,v] of Object.entries(d.score_kl || {}))      { kl[+t]  = v; tset.add(+t); }
     for(const [t,v] of Object.entries(d.score_tv || {}))      { l1[+t]  = v; tset.add(+t); }
+    const exp_sos = {};
+    for(const [t,ks_] of Object.entries(d.exp_sos || {})){
+      exp_sos[+t] = {};
+      for(const [k,v] of Object.entries(ks_)){ exp_sos[+t][+k] = v; hasExpSos = true; }
+      tset.add(+t);
+    }
     return {
       method:d.label, family:family(d.label),
       bits: d.bits_per_dim ?? null,
@@ -308,11 +316,11 @@ function parseDataset(block, meta){
       recon_us: d.recon_us ?? null,
       mse: d.mse_score ?? null, bias: d.bias_score ?? null,
       kl, l1, recon: d.mse_recon ?? null, recon_bias: d.bias_recon ?? null,
-      recalls, sos,
+      recalls, sos, exp_sos,
     };
   });
   const temps = [...tset].sort((a,b)=>a-b);
-  return { rows, ks, temps, hasSos };
+  return { rows, ks, temps, hasSos, hasExpSos };
 }
 
 let DATA = null, famColor = {}, curFname = "vq-bench";
@@ -338,7 +346,8 @@ function availFields(){
   for(const r of DATA.rows){
     for(const f of FIELD_ORDER){
       const fd = FIELDS[f];
-      const v = fd.perK ? (k0!=null ? fd.get(r,k0) : null)
+      const v = fd.perKT ? (k0!=null && t0!=null ? fd.get(r,k0,t0) : null)
+              : fd.perK ? (k0!=null ? fd.get(r,k0) : null)
               : fd.perT ? (t0!=null ? fd.get(r,t0) : null)
               : fd.get(r);
       if(v!=null) present[f]=true;
@@ -382,9 +391,10 @@ function setData(parsed){
 // Resolve an axis label, substituting the active k / temperature into per-k /
 // per-t metric names ("recall@k" → "recall@10").
 function axisTitle(field, k, t){
-  let s = FIELDS[field].label;
-  if(FIELDS[field].perK && Number.isFinite(k)) s = s.replace("@k", "@"+k);
-  if(FIELDS[field].perT && Number.isFinite(t)) s = s.replace("{t}", t);
+  const fd = FIELDS[field];
+  let s = fd.label;
+  if((fd.perK || fd.perKT) && Number.isFinite(k)) s = s.replace("@k", "@"+k);
+  if((fd.perT || fd.perKT) && Number.isFinite(t)) s = s.replace("{t}", t);
   return s;
 }
 
@@ -425,12 +435,12 @@ function redraw(){
   const xlog=document.getElementById("xlog").checked, ylog=document.getElementById("ylog").checked;
   const grp=document.getElementById("gsel").value;
   const filt=document.getElementById("q").value.toLowerCase();
-  const isPerK = (FIELDS[xf].perK || FIELDS[yf].perK);
-  const isPerT = (FIELDS[xf].perT || FIELDS[yf].perT);
+  const isPerK = (FIELDS[xf].perK || FIELDS[yf].perK || FIELDS[xf].perKT || FIELDS[yf].perKT);
+  const isPerT = (FIELDS[xf].perT || FIELDS[yf].perT || FIELDS[xf].perKT || FIELDS[yf].perKT);
   document.getElementById("ksel").disabled = !isPerK;
   document.getElementById("tsel").disabled = !isPerT;
 
-  const acc = (f,r) => FIELDS[f].perK ? FIELDS[f].get(r,k) : FIELDS[f].perT ? FIELDS[f].get(r,t) : FIELDS[f].get(r);
+  const acc = (f,r) => FIELDS[f].perKT ? FIELDS[f].get(r,k,t) : FIELDS[f].perK ? FIELDS[f].get(r,k) : FIELDS[f].perT ? FIELDS[f].get(r,t) : FIELDS[f].get(r);
   const gx = r => acc(xf,r);
   const gy = r => acc(yf,r);
   const ok = (x,y) => x!=null && y!=null && (!xlog||x>0) && (!ylog||y>0);
@@ -603,6 +613,7 @@ function availableCols(){
   for(const t of DATA.temps) if(any(r=>r.l1[t]!=null))  cols.push({key:`l1@${t}`, label:`attn TV (τ=${tg(t)})`, kind:"num3",get:r=>r.l1[t]});
   for(const k of DATA.ks) cols.push({key:`r${k}`, label:`R@${k}`, kind:"recall", get:r=>r.recalls[k]});
   if(DATA.hasSos) for(const k of DATA.ks) cols.push({key:`s${k}`, label:`SOS@${k}`, kind:"recall", get:r=>r.sos[k]});
+  if(DATA.hasExpSos) for(const k of DATA.ks) for(const t of DATA.temps) cols.push({key:`es${k}@${t}`, label:`expSOS@${k} (τ=${tg(t)})`, kind:"recall", get:r=>r.exp_sos?.[t]?.[k]});
   return cols;
 }
 

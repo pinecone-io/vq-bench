@@ -81,6 +81,9 @@ pub struct MethodResult {
     /// SOS@k, keyed by k.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sos: Option<BTreeMap<usize, f64>>,
+    /// exp-SOS@k over exp(score/tau)-transformed scores, keyed by temperature then k.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp_sos: Option<BTreeMap<String, BTreeMap<usize, f64>>>,
     /// Softmax KL divergence, keyed by temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_kl: Option<BTreeMap<String, f64>>,

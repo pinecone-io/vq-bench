@@ -102,6 +102,53 @@ pub fn sos(
     out
 }
 
+/// exp-SOS@k: like [`sos`], but each summed score `s` is replaced by `exp(s / tau)`,
+/// keyed by temperature (outer) then k (inner). `exp` is monotonic for `tau > 0`, so the
+/// approx/true top-k sets match SOS's — only the summed values change. vq-bench data is
+/// unit-normalized (scores in `[-1, 1]`), so `exp(s/tau)` is finite for every swept `tau`
+/// and needs no max-shift. (A per-query shift would skew the cross-query micro-average;
+/// only a global shift is exact, and it is unnecessary given the bound.)
+pub fn exp_sos(
+    true_scores: &[Vec<f32>],
+    approx_scores: &[Vec<f32>],
+    ks: &[usize],
+    temps: &[f64],
+    seed: u64,
+) -> BTreeMap<String, BTreeMap<usize, f64>> {
+    // Ranks depend on neither k nor tau, so resolve each query's ordering once.
+    let ranked: Vec<(&Vec<f32>, Vec<usize>, Vec<usize>)> = true_scores
+        .iter()
+        .zip(approx_scores)
+        .enumerate()
+        .map(|(qi, (ts, as_))| {
+            let mut rng = query_rng(seed, qi);
+            let tr = ranks_desc(ts, &mut rng);
+            let ar = ranks_desc(as_, &mut rng);
+            (ts, tr, ar)
+        })
+        .collect();
+    let mut out = BTreeMap::new();
+    for &t in temps {
+        let mut per_k = BTreeMap::new();
+        for &k in ks {
+            let (mut numer, mut denom) = (0.0f64, 0.0f64);
+            for (ts, tr, ar) in &ranked {
+                numer += ar[..k.min(ar.len())]
+                    .iter()
+                    .map(|&p| (ts[p] as f64 / t).exp())
+                    .sum::<f64>();
+                denom += tr[..k.min(tr.len())]
+                    .iter()
+                    .map(|&p| (ts[p] as f64 / t).exp())
+                    .sum::<f64>();
+            }
+            per_k.insert(k, if denom != 0.0 { numer / denom } else { f64::NAN });
+        }
+        out.insert(temp_key(t), per_k);
+    }
+    out
+}
+
 /// Mean squared and mean signed error of the estimated scores, over all pairs.
 pub fn score_mse_bias(true_scores: &[Vec<f32>], approx_scores: &[Vec<f32>]) -> (f64, f64) {
     let (mut sse, mut sum_err, mut n) = (0.0f64, 0.0f64, 0u64);
@@ -222,6 +269,29 @@ mod tests {
         let sos = sos(&truth, &truth, &[1, 2], 1);
         assert!((sos[&1] - 1.0).abs() < 1e-12);
         assert!((sos[&2] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn exp_sos_perfect_is_one_and_keys_are_temp_then_k() {
+        let truth = vec![vec![3.0, 2.0, 1.0], vec![1.0, 5.0, 2.0]];
+        // Perfect approx → ratio 1 at every (temperature, k); keys are temp→k.
+        let e = exp_sos(&truth, &truth, &[1, 2], &[0.5, 1.0], 1);
+        assert_eq!(e.keys().cloned().collect::<Vec<_>>(), vec!["0.5", "1"]);
+        for t in ["0.5", "1"] {
+            assert_eq!(e[t].keys().copied().collect::<Vec<_>>(), vec![1, 2]);
+            assert!((e[t][&1] - 1.0).abs() < 1e-12);
+            assert!((e[t][&2] - 1.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn exp_sos_imperfect_is_in_unit_interval() {
+        // Reversed approx rankings → the approx top-k picks weaker true scores, so the
+        // exp-transformed ratio sits strictly inside (0, 1].
+        let truth = vec![vec![3.0, 2.0, 1.0], vec![1.0, 5.0, 2.0]];
+        let approx = vec![vec![0.0, 1.0, 2.0], vec![2.0, 1.0, 0.0]];
+        let v = exp_sos(&truth, &approx, &[1], &[1.0], 1)["1"][&1];
+        assert!(v > 0.0 && v <= 1.0, "exp-SOS@1 out of range: {v}");
     }
 
     #[test]
