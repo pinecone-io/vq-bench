@@ -1,8 +1,7 @@
 //! OPTIMIZE_SIGNS: learns a dxd orthogonal rotation R minimizing the sign-
-//! quantization error ||sign(x R) - x R||^2 (the ITQ rotation).
+//! quantization error ||sign(x R) - x R||^2
 //! -
-//! Fit: from a Haar-random R (seeded), alternate B = sign(X R) and
-//!      R = procrustes(X^T B) for ITERS steps.
+//! Fit: starting from random R, alternate between rounding to signs and fitting the rotation to the signs
 //! Model: R, the learned orthogonal rotation
 //! Code for vector x: empty
 //! Apply: x --> x R

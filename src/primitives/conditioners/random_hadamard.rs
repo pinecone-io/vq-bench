@@ -1,14 +1,11 @@
 //! RANDOM_HADAMARD: near-orthogonal random rotation via the randomized Hadamard
-//! transform (FhtKac): O(d log d) time, O(d) state, vs random_rotate's dense O(d^2).
+//! transform (FhtKac): O(d log d) time, O(d) state, vs random_rotate's O(d^2).
 //! -
 //! Model: the ±1 sign vectors, one per round, of length padded_dim
 //! Code for vector x: empty
 //! Apply: x --> R x  (x zero-padded from dim up to a multiple of 64)
 //! Reconstruct: y --> R^T y, cropped back to dim  (R orthonormal)
 //! Score: s --> s  (queries are rotated the same way)
-//!
-//! R is a product over `rounds` of a ±1 sign flip, a Walsh-Hadamard block, and a Kac
-//! butterfly -- each an orthonormal involution, so R^T replays them in reverse.
 
 use ndarray::{s, Array2, ArrayView2};
 

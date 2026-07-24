@@ -1,6 +1,5 @@
 //! `scalar`: per-dimension rescale to `[0, 1]` (calibrated over the fit set), then a
-//! `b`-bit uniform lattice. Scalar quantization -- the per-vector `minmax` done per
-//! coordinate instead.
+//! `b`-bit uniform lattice.
 
 use anyhow::{ensure, Result};
 

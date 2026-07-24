@@ -1,13 +1,10 @@
-//! CAST(SIGN): one sign bit per coordinate, scored as the asymmetric dot scaled by
-//! the QJL constant a = sqrt(pi / 2d) (d = input dim)
+//! CAST(SIGN): one sign bit per coordinate, leaving query unquantized
 //! -
 //! Model: input dim d
 //! Code for vector x: one sign bit per coordinate (1 iff x_i >= 0), decoded to +-a
 //! Apply: x --> x - a * sign(x)          (residual for the next stage)
 //! Reconstruct: y --> a * sign(x) + y
 //! Score: s --> a * <q, sign(x)> + s
-//! The bare sign sum <q, sign(x)> overshoots the true dot by ~sqrt(d); a shrinks it
-//! back onto that scale. `qjl` and `itq_asym` (both unit-normalized upstream) rely on it.
 
 use ndarray::{Array2, ArrayView2};
 

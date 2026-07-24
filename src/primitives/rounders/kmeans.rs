@@ -5,8 +5,6 @@
 //! Apply: x --> x - centroid(k)            (residual for the next stage)
 //! Reconstruct: y --> centroid(k) + y
 //! Score: s --> <q, centroid(k)> + s
-//!
-//! The terminal rounder behind PQ (one instance per segment).
 
 use ndarray::{Array2, ArrayView2, Axis};
 

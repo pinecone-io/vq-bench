@@ -5,8 +5,6 @@
 //! Apply: x --> Rx
 //! Reconstruct: y --> R^T * y   (R^T = R^-1)
 //! Score: s --> s  (queries also rotated)
-//!
-//! Note: this is the dense `full` variant, taking O(d^2) time
 
 use std::sync::OnceLock;
 

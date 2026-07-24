@@ -1,0 +1,31 @@
+{
+  "datasets": [
+    "arxiv-nomic-768-normalized",
+    "coco-nomic-768-normalized",
+    "ccnews-nomic-768-normalized",
+    "yahoo-minilm-384-normalized",
+    "laion-clip-512-normalized"
+  ],
+  "seed": 1,
+  "n_fit": 50000,
+  "n_reconstruct": 1000,
+  "n_eval": 1000,
+  "k": [1, 10, 100],
+  "temp": [0.01, 0.05, 0.1],
+  "methods": [
+    { "name": "minmax", "b": [1, 2, 4, 6] },
+    { "name": "scalar", "b": [1, 2, 4, 6] },
+    { "name": "eden_mse", "b": [1, 2, 4, 6] },
+    { "name": "eden_prod", "b": [1, 2, 4, 6] },
+    { "name": "turboquant_mse", "b": [1, 2, 4, 6] },
+    { "name": "turboquant_prod", "b": [2, 4, 6] },
+    { "name": "e_rabitq", "b": [2, 4, 6] },
+    { "name": "rabitq" },
+    { "name": "qjl" },
+    { "name": "simhash" },
+    { "name": "itq" },
+    { "name": "itq_asym" },
+    { "name": "pq", "centroids": 256, "section_dim": [8, 4, 2] },
+    { "name": "opq", "centroids": 256, "section_dim": [8, 4, 2] }
+  ]
+}

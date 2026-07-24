@@ -1,15 +1,12 @@
 //! OPTIMIZE_PQ: learns a dxd orthogonal rotation R minimizing product-quantization
-//! reconstruction error (the OPQ rotation).
+//! reconstruction error
 //! -
+//! Fit: alternate between PQ-encoding to centroids and updating rotation to match centroids
 //! Model: R, the learned orthogonal rotation
 //! Code for vector x: empty
 //! Apply: x --> x R
 //! Reconstruct: y --> R^T * y   (R^T = R^-1)
 //! Score: s --> s  (queries also rotated)
-//! Fit: from R = I, alternate (a) PQ-encode X R per section_dim segment (k = centroids
-//!      Lloyd centroids) into Xhat, and (b) R = procrustes(X^T Xhat), for ITERS steps.
-//!      The internal codebooks are discarded -- the downstream split(segment).kmeans
-//!      re-learns them on the rotated data.
 
 use ndarray::{s, Array2, ArrayView2, Axis};
 

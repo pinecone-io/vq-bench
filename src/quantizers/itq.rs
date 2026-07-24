@@ -1,5 +1,5 @@
 //! `itq`: Iterative Quantization — center, unit-normalize, then a learned rotation
-//! minimizing sign-quantization error, scored by a Hamming-angle estimate.
+//! minimizing sign-quantization error
 
 use anyhow::Result;
 
