@@ -5,7 +5,11 @@
 
 /* Always reserve the scrollbar track so percentage margins don't re-center
    (and shift the header) between pages of different heights. */
-html{overflow-y:scroll}
+/* iOS Safari inflates text per block on rotation to landscape, scaled by how wide
+   the block is — so a wide table column paints larger than a narrow one despite an
+   identical font-size, and computed style still reports the declared value. 100%
+   opts out of the boost while leaving pinch-zoom alone (unlike `none`). */
+html{overflow-y:scroll;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;margin-right:20%;
      color:#222;font-size:16px;padding-bottom:46px}
 
@@ -62,13 +66,31 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;marg
 #docmsg{color:#888;font-size:14px;padding:12px 2px}
 
 /* Narrow screens: the 20% gutters above would spend 40% of a phone's width on
-   empty margin, so hand it all back to the content. */
-@media (max-width:900px){
-  body{margin-left:0;margin-right:0}
+   empty margin, but 0 runs the nav rule off both edges — keep a small one. Short
+   counts as narrow so a phone in landscape gets the same treatment. */
+@media (max-width:900px), (max-height:600px){
+  body{margin-left:10px;margin-right:10px}
 }
 @media (max-width:760px){
   /* align-items:flex-start above shrink-wraps the children once this is a column,
      so #doc would size to its max-content and hang off the right edge. */
   #doclayout{flex-direction:column;align-items:stretch}
   #docnav{position:static;flex-basis:auto;width:100%}
+}
+/* Short viewports (landscape phones): vertical space is the scarce resource, so
+   reclaim it — but reclaim it from the hero and the vertical rhythm, NOT from body
+   copy. Text renders at its declared size now that the inflation above is opted out,
+   so 16px prose stays 16px here; shrinking it only made the page hard to read.
+   Must match the same block in index.html's inline style, which carries its own
+   copy for `vqb view`. */
+@media (max-height:600px){
+  #brand{font-size:27px;padding:10px 14px 2px}
+  #tagline{font-size:15.5px;padding:0 14px 10px}
+  /* Headings only, and only enough to stay under the smaller brand. */
+  #doc h1{font-size:22px;margin:4px 0 10px}
+  #doc h2{font-size:18px;margin:20px 0 8px;padding-top:14px}
+  #doc h3{font-size:15.5px;margin:16px 0 5px}
+  #doc pre{padding:11px 13px}
+  #doc th,#doc td{padding:5px 11px}
+  #docnav a{padding:5px 10px}
 }

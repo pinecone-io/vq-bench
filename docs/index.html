@@ -11,7 +11,11 @@
 <style>
   /* Always reserve the scrollbar track so percentage margins don't re-center
      (and shift the header) between pages of different heights. */
-  html{overflow-y:scroll}
+  /* iOS Safari inflates text per block on rotation to landscape, scaled by how wide
+     the block is — so a wide table column paints larger than a narrow one despite an
+     identical font-size, and computed style still reports the declared value. 100%
+     opts out of the boost while leaving pinch-zoom alone (unlike `none`). */
+  html{overflow-y:scroll;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 20%;margin-right:20%;color:#222;padding-bottom:46px;font-size:16px}
   h1{font-size:17px;margin:10px 14px 2px}
   #benchhead{font-size:26px;font-weight:700;letter-spacing:-0.01em;color:#111;margin:18px 14px 12px}
@@ -126,14 +130,25 @@
   /* ── narrow screens ───────────────────────────────────────────────────────
      Kept last on purpose: a media query adds no specificity, so these only beat
      the equally-specific base rules above by coming later in source order. */
-  /* The 20% gutters would spend 40% of a phone's width on empty margin. */
-  @media (max-width:900px){
-    body{margin-left:0;margin-right:0}
+  /* The 20% gutters would spend 40% of a phone's width on empty margin, but 0 lets
+     the section rules and table borders run right off both edges — keep a small one. */
+  @media (max-width:900px), (max-height:600px){
+    body{margin-left:10px;margin-right:10px}
   }
-  @media (max-width:760px){
+  /* Narrow OR short — only for rules that answer to either. A phone in landscape is
+     ~844x390 (932x430 on a Pro Max), wide enough to clear a width-only breakpoint but
+     far too short for the desktop scale. Nothing width-dependent belongs here: at 844
+     there is plenty of width, and relaxing a width rule there actively hurts (it let
+     the Paper column swell to 79% of the references table). */
+  @media (max-width:760px), (max-height:600px){
     #plotwrap{flex-direction:column}
-    #fig{height:440px}
-    #legendpanel{flex-basis:auto;width:100%;height:auto;max-height:220px}
+    /* Cap against the viewport too: 440px of chart plus the hero and control bars
+       does not fit in a 390px-tall landscape phone. */
+    #fig{height:min(440px,68vh)}
+    #legendpanel{flex-basis:auto;width:100%;height:auto;max-height:min(220px,34vh)}
+  }
+  /* Genuinely narrow only. A landscape phone must not get these. */
+  @media (max-width:760px){
     /* The results table is all nowrap cells, so it's wider than a phone. Scroll it
        on its own rather than letting it drag the whole page sideways. Only at this
        width: overflow-x also makes the wrapper a vertical scroll container, which
@@ -146,11 +161,26 @@
        alone is wider than a phone. Let it shrink and ellipsize instead. */
     #top .ctl,#bar .ctl{max-width:100%}
     #top select,#bar select{max-width:100%;min-width:0}
-    /* Long quantizer names don't fit a pinned 26% column at this width. */
+    /* Long quantizer names don't fit a pinned 26% column at this width. Above it the
+       pin has to stay, or the long-title Paper column absorbs the freed space. */
     table.info.wide-first th:first-child,table.info.wide-first td:first-child{width:auto;white-space:normal}
     /* Safety valve: these hold prose and so mostly reflow, but a long unbreakable
        cell (a paper title, a wide number) would otherwise widen the whole page. */
     table.info{display:block;overflow-x:auto}
+  }
+  /* Short viewports (landscape phones): vertical space is the scarce resource, so
+     reclaim it — but reclaim it from the hero and the vertical rhythm, NOT from body
+     copy. Text renders at its declared size now that the inflation above is opted
+     out, so the about prose and info tables keep their full size here. */
+  @media (max-height:600px){
+    #brand{font-size:27px;padding:10px 14px 2px}
+    #tagline{font-size:15.5px;padding:0 14px 10px}
+    /* Heading only, and only enough to stay under the smaller brand. */
+    #benchhead{font-size:21px;margin:12px 14px 8px}
+    #about p{line-height:1.5;margin:0 0 7px}
+    #about summary{padding:9px 2px}
+    #about details > *:not(summary){margin-bottom:9px}
+    table.info th,table.info td{padding:5px 10px}
   }
 </style></head><body>
 <!-- Single-run data is injected into the block below by `vqb view`; on the
@@ -161,7 +191,7 @@
 <p id="tagline">a composable vector quantization framework</p>
 
 <section id="about">
-  <p><b>VQ-bench</b> is an open-source benchmark and framework for vector quantization. It implements several algorithmic primitives and builds quantizers by composing these primitives. We evaluate the performance of existing quantizers on several size and quality metrics and we publish the results on this page. </p>
+  <p><b>VQ-bench</b> is an open-source benchmark and framework for vector quantization. It implements several algorithmic primitives and builds quantizers by composing these primitives. It evaluates the performance of existing quantizers on several size and quality metrics, and we publish the results on this page. </p>
 
   <details>
     <summary>Quantizers</summary>
@@ -506,7 +536,9 @@ function axisTitle(field, k, t){
 // axis titles, ticks and left margin would swallow the plot area. Plotly's
 // responsive:true resizes the canvas but never rescales type, so we do it here.
 // Breakpoint matches the CSS above, which stacks the legend below the plot.
-const narrow = () => window.innerWidth <= 760;
+// Must track the CSS breakpoint above: short counts as narrow, or a rotated phone
+// keeps the desktop type scale in a viewport with no room for it.
+const narrow = () => window.innerWidth <= 760 || window.innerHeight <= 600;
 
 function axisLayout(vals, field, log, label){
   const sm = narrow();
