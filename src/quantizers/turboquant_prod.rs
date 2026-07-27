@@ -31,7 +31,7 @@ pub fn turboquant_prod(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> R
     );
     let stage = rotation.stage(dim, seed);
     let mid_dim = stage.out_dim(dim); // width the residual lives in (padded under Hadamard)
-    let residual = qjl(rotation, seed ^ RESIDUAL_ROTATION_SEED, mid_dim)?;
+    let residual = qjl(1.0, rotation, seed ^ RESIDUAL_ROTATION_SEED, mid_dim)?;
     Pipeline::new(
         dim,
         vec![

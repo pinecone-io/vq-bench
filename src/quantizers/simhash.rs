@@ -1,62 +1,156 @@
-//! `simhash`: center, unit-normalize, rotate, then 1-bit signs scored by a
-//! Hamming-angle inner-product estimate.
+//! `simhash`: center, unit-normalize, rotate into `b*dim` dimensions, then 1-bit signs
+//! scored by a Hamming-angle inner-product estimate.
 
-use anyhow::Result;
+use anyhow::{ensure, Result};
 
 use super::catalog::{get_or, QuantizerSpec};
 use super::Rotation;
-use crate::{CastHamming, Center, Normalize, Pipeline};
+use crate::{CastHamming, Center, Normalize, Pipeline, Primitive, Resize};
 
 pub const SPEC: QuantizerSpec = QuantizerSpec {
     key: "simhash",
     family: "SimHash",
-    params: &["rotation"],
-    describe: "Center -> Normalize -> Rotate -> CastHamming",
-    build: |p, seed, dim| simhash(get_or(p, "rotation", Rotation::Hadamard)?, seed, dim),
+    params: &["b", "rotation"],
+    describe: "Center -> Normalize -> Rotate to b*dim dims -> CastHamming",
+    build: |p, seed, dim| {
+        simhash(
+            get_or(p, "b", 1.0f32)?,
+            get_or(p, "rotation", Rotation::Hadamard)?,
+            seed,
+            dim,
+        )
+    },
 };
 
-pub fn simhash(rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
-    Pipeline::new(
-        dim,
-        vec![
-            Box::new(Center),
-            Box::new(Normalize),
-            rotation.stage(dim, seed),
-            Box::new(CastHamming),
-        ],
-    )
+/// One sign bit per coded dimension, so `b` bits per input dimension means
+/// `m = b*dim` random hyperplanes. `b` may be fractional (fewer bits than dims).
+pub fn simhash(bits: f32, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
+    ensure!(bits.is_finite() && bits > 0.0, "b must be positive, got {bits}");
+    let m = coded_dim(bits, dim);
+    let wide = dim.max(m);
+    let stage = rotation.stage(wide, seed);
+    let rotated = stage.out_dim(wide); // padded to a multiple of 64 under Hadamard
+    let mut stages: Vec<Box<dyn Primitive>> = vec![Box::new(Center), Box::new(Normalize)];
+    if wide != dim {
+        stages.push(Box::new(Resize::new(dim, wide))); // pad up, so the added dims rotate in
+    }
+    stages.push(stage);
+    if m != dim && rotated != m {
+        stages.push(Box::new(Resize::new(rotated, m))); // truncate down to the budget
+    }
+    stages.push(Box::new(CastHamming));
+    Pipeline::new(dim, stages)
+}
+
+/// Coded dims for a budget of `bits` sign bits per input dim: `m == dim` at `b == 1`,
+/// which leaves the rotation's own width (pad included) untouched.
+pub(super) fn coded_dim(bits: f32, dim: usize) -> usize {
+    ((bits * dim as f32).round() as usize).max(1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{math, AsQuantizer, Quantizer};
+    use crate::{byte_split, math, AsQuantizer, Quantizer};
     use ndarray::{s, Array2};
 
     fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
         codes.iter().map(Vec::as_slice).collect()
     }
 
+    /// Top-1 hits over 8 queries, each a noised copy of one base vector.
+    fn hits(bits: f32, rotation: Rotation, d: usize) -> usize {
+        let mut rng = math::seed(42);
+        let v: Array2<f32> = math::gaussian(&mut rng, (40, d));
+        let q = &v.slice(s![0..8, ..]).to_owned() + &(0.3 * math::gaussian(&mut rng, (8, d)));
+        let codec = AsQuantizer(simhash(bits, rotation, 1, d).unwrap());
+        let model = codec.fit(v.view(), None);
+        let codes = codec.encode(&model, v.view());
+        let est = codec.score(&model, q.view(), &refs(&codes));
+        (0..8)
+            .filter(|&i| {
+                let row = est.row(i);
+                (0..row.len()).max_by(|&a, &b| row[a].total_cmp(&row[b])).unwrap() == i
+            })
+            .count()
+    }
+
+    #[test]
+    fn rejects_out_of_range_bits() {
+        assert!(simhash(0.0, Rotation::Full, 1, 8).is_err());
+        assert!(simhash(-1.0, Rotation::Full, 1, 8).is_err());
+        assert!(simhash(f32::NAN, Rotation::Full, 1, 8).is_err());
+        assert!(simhash(0.25, Rotation::Full, 1, 8).is_ok());
+        assert!(simhash(16.0, Rotation::Full, 1, 8).is_ok());
+    }
+
     /// Each query is a noised copy of one base vector and must score it highest.
     #[test]
     fn recovers_nearest_neighbor() {
-        let mut rng = math::seed(42);
-        let v: Array2<f32> = math::gaussian(&mut rng, (40, 128));
-        let q = &v.slice(s![0..8, ..]).to_owned() + &(0.3 * math::gaussian(&mut rng, (8, 128)));
         for rotation in [Rotation::Full, Rotation::Hadamard] {
-            let codec = AsQuantizer(simhash(rotation, 1, 128).unwrap());
+            assert!(hits(1.0, rotation, 128) >= 7, "top-1 hits");
+        }
+    }
+
+    /// b == 1 is the original pipeline: no resize stage, so the rotation keeps its own
+    /// width (padded under Hadamard) and encode does no extra passes.
+    #[test]
+    fn b1_adds_no_resize_stage() {
+        assert_eq!(coded_dim(1.0, 128), 128);
+        let d = 96; // Hadamard pads to 128, which b == 1 must leave alone
+        let v: Array2<f32> = math::gaussian(&mut math::seed(5), (4, d));
+        for (rotation, want) in [(Rotation::Full, d), (Rotation::Hadamard, 128)] {
+            let codec = AsQuantizer(simhash(1.0, rotation, 1, d).unwrap());
             let model = codec.fit(v.view(), None);
             let codes = codec.encode(&model, v.view());
-            let est = codec.score(&model, q.view(), &refs(&codes));
-            let mut hits = 0;
-            for i in 0..8 {
-                let row = est.row(i);
-                let argmax = (0..row.len()).max_by(|&a, &b| row[a].total_cmp(&row[b])).unwrap();
-                if argmax == i {
-                    hits += 1;
-                }
+            let per_vector = byte_split(&model, &codes).1 / 4;
+            assert_eq!(per_vector, want.div_ceil(8) + 4, "b=1 kept width");
+        }
+    }
+
+    /// The code lands on exactly m bits per vector (plus Normalize's 4-byte norm) for
+    /// either rotation, including the fractional and wider-than-dim cases.
+    #[test]
+    fn code_bytes_track_the_bit_budget() {
+        let d = 96; // not a multiple of 64: Hadamard pads to 128 internally
+        let v: Array2<f32> = math::gaussian(&mut math::seed(5), (4, d));
+        for rotation in [Rotation::Full, Rotation::Hadamard] {
+            for bits in [0.25f32, 0.5, 2.0, 4.0] {
+                let m = (bits * d as f32).round() as usize;
+                let codec = AsQuantizer(simhash(bits, rotation, 1, d).unwrap());
+                let model = codec.fit(v.view(), None);
+                let codes = codec.encode(&model, v.view());
+                let per_vector = byte_split(&model, &codes).1 / 4;
+                assert_eq!(per_vector, m.div_ceil(8) + 4, "b={bits} m={m}");
             }
-            assert!(hits >= 7, "top-1 hits {hits}/8");
+        }
+    }
+
+    /// Relative squared error of the inner-product estimate over a random batch.
+    fn score_error(bits: f32, rotation: Rotation, d: usize) -> f32 {
+        let mut rng = math::seed(11);
+        let v: Array2<f32> = math::gaussian(&mut rng, (80, d));
+        let q: Array2<f32> = math::gaussian(&mut rng, (10, d));
+        let codec = AsQuantizer(simhash(bits, rotation, 1, d).unwrap());
+        let model = codec.fit(v.view(), None);
+        let codes = codec.encode(&model, v.view());
+        let est = codec.score(&model, q.view(), &refs(&codes));
+        let exact = q.dot(&v.t());
+        let err: f32 = est.iter().zip(exact.iter()).map(|(e, t)| (e - t) * (e - t)).sum();
+        err / exact.iter().map(|t| t * t).sum::<f32>()
+    }
+
+    /// More hyperplanes estimate the inner product more tightly; fewer degrade it. This is
+    /// the property the bit budget buys, and it holds for either rotation.
+    #[test]
+    fn error_falls_with_the_bit_budget() {
+        for rotation in [Rotation::Full, Rotation::Hadamard] {
+            let errs: Vec<f32> = [0.25f32, 1.0, 4.0]
+                .iter()
+                .map(|&b| score_error(b, rotation, 256))
+                .collect();
+            assert!(errs[1] < errs[0], "b=1 err {} not below b=0.25 {}", errs[1], errs[0]);
+            assert!(errs[2] < errs[1], "b=4 err {} not below b=1 {}", errs[2], errs[1]);
         }
     }
 }

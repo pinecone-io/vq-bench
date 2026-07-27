@@ -16,6 +16,7 @@ pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static st
                 ("Scale", "apply a fixed affine scaling to every vector"),
                 ("RandomRotate", "apply a random orthogonal transformation to all vectors"),
                 ("RandomHadamard", "fast near-orthogonal random rotation via the randomized Hadamard transform"),
+                ("Resize", "zero-pad or truncate every vector to a fixed number of dimensions"),
                 ("OptimizeSigns", "learn an orthogonal rotation minimizing sign-quantization error"),
                 ("OptimizePq", "learn an orthogonal rotation minimizing product-quantization error"),
             ],

@@ -9,7 +9,7 @@ mod splitters;
 
 pub use conditioners::{
     AbsMax, Center, MinMax, MinMaxDim, Normalize, OptimizePq, OptimizeSigns, RandomHadamard,
-    RandomRotate, Scale,
+    RandomRotate, Resize, Scale,
 };
 pub use rounders::{CastAngular, CastHamming, CastNormal, CastSign, CastUint, Kmeans, NormalScale};
 pub use splitters::{SegmentSplit, Split};

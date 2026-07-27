@@ -7,6 +7,7 @@ mod optimize_pq;
 mod optimize_signs;
 mod random_hadamard;
 mod random_rotate;
+mod resize;
 mod scale;
 
 pub use absmax::AbsMax;
@@ -18,4 +19,5 @@ pub use optimize_pq::OptimizePq;
 pub use optimize_signs::OptimizeSigns;
 pub use random_hadamard::RandomHadamard;
 pub use random_rotate::RandomRotate;
+pub use resize::Resize;
 pub use scale::Scale;

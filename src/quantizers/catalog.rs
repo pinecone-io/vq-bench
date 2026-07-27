@@ -128,6 +128,12 @@ impl FromParam for u8 {
     }
 }
 
+impl FromParam for f32 {
+    fn from_value(v: &Value) -> Result<f32> {
+        Ok(v.as_f64().context("must be a number")? as f32)
+    }
+}
+
 impl FromParam for usize {
     fn from_value(v: &Value) -> Result<usize> {
         let n = v.as_u64().context("must be a non-negative integer")?;
