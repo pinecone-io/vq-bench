@@ -403,7 +403,7 @@ function parseURL(){
   return s;
 }
 // Default view when the page is opened with no query string.
-const DEFAULT_VIEW = {exp:"benchmark", ds:"arxiv-nomic-768-normalized", x:"bits", y:"sos", k:"10"};
+const DEFAULT_VIEW = {exp:"benchmark", ds:"arxiv-nomic-768-normalized", x:"bits", y:"recall", k:"10"};
 // Whatever the URL omits falls back to the default view, which is what lets
 // writeURL leave defaults out of the address bar without changing the view a
 // link restores.
@@ -445,7 +445,8 @@ function writeURL(){
   const g=document.getElementById("gsel").value; if(g && g!=="family") p.set("g", g);
   const q=document.getElementById("q").value; if(q) p.set("q", q);
   const qs = p.toString();
-  history.replaceState(null, "", qs ? "?"+qs : location.pathname);
+  const path = location.pathname.replace(/\/index\.html$/, "/") || "/";
+  history.replaceState(null, "", qs ? path+"?"+qs : path);
 }
 
 function assignColors(rows){

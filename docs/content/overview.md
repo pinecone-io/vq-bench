@@ -22,7 +22,7 @@ VQ-bench treats every **quantizer** as a black box that must support four operat
 3. Given dataset codes, return approximate **reconstructions** of the corresponding vectors.
 4. Given a query and dataset codes, returns approximate inner-product **scores** for the corresponding vectors.
 
-The job of the harness is to perform the above operations on all quantizers (for a suite of datasets) and use the returned reconstructions and scores to compute several quality metrics. The final [results](index.html) are presented interactively so that different tradeoffs can be explored.
+The job of the harness is to perform the above operations on all quantizers (for a suite of datasets) and use the returned reconstructions and scores to compute several quality metrics. The final [results](./) are presented interactively so that different tradeoffs can be explored.
 
 ### Composability
 

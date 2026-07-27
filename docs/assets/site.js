@@ -21,7 +21,8 @@
     for(const l of LINKS){
       const a = document.createElement("a");
       a.className = "lnk" + (l.file===here ? " active" : "");
-      a.href = l.file; a.textContent = l.label;
+      a.href = l.file === "index.html" ? "./" : l.file;
+      a.textContent = l.label;
       nav.appendChild(a);
     }
     const spacer = document.createElement("span"); spacer.className = "spacer"; nav.appendChild(spacer);
