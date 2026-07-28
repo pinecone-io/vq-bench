@@ -77,7 +77,7 @@ Each run measures size (bits per dimension) and the given quality metrics, as we
 values, and an aggregated `.json`.
 
 The remaining commands split `run` into reusable stages: `encode` does the
-expensive fit + encode once, and `eval` recomputes the metrics from and existing `.raw`.
+expensive fit + encode once, and `eval` recomputes the metrics from an existing `.raw`.
 ```bash
 vqb run    <config> --fresh    # re-encode from scratch, ignoring any cached codes
 vqb encode <config>            # cache codes to results/codes/ for a later run to reuse
