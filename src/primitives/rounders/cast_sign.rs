@@ -30,6 +30,10 @@ fn decode_signs(codes: &[&[u8]], d: usize) -> Array2<f32> {
 }
 
 impl Primitive for CastSign {
+    fn describe() -> &'static str {
+        "round vector to ±1 but leave query unquantized"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.ncols())
     }

@@ -63,6 +63,10 @@ impl CastNormal {
 }
 
 impl Primitive for CastNormal {
+    fn describe() -> &'static str {
+        "round unit vector with b-bit Lloyd-Max normal codebook"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.ncols())
     }

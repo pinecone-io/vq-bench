@@ -1,12 +1,75 @@
-//! The [`Quantizer`] interface and the [`AsQuantizer`] adapter.
+//! The [`Quantizer`] trait and the [`AsQuantizer`] adapter.
 
+use std::collections::BTreeMap;
+
+use anyhow::{anyhow, Result};
 use ndarray::{Array2, ArrayView2};
+use serde_json::Value;
 
-use crate::Primitive;
+use crate::primitive::type_display_name;
+use crate::{Pipeline, Primitive};
 
-/// The quantizer interface: fit a model, encode vectors to per-vector codes,
-/// decode via [`reconstruct`](Self::reconstruct) / [`score`](Self::score).
-pub trait Quantizer {
+/// A method's config params.
+pub type Params = BTreeMap<String, Value>;
+
+/// A quantizer: its config identity (key, display name, params, description), how to
+/// build itself from config params, and the runtime interface the harness drives —
+/// `fit`/`encode`/`reconstruct`/`score`. Most quantizers hold a [`Pipeline`] and
+/// implement the four by delegating to it (see [`AsQuantizer`] or any family in
+/// `src/quantizers/`), but any direct implementation is equally valid. `Send + Sync`
+/// so the runner can encode row chunks across threads.
+pub trait Quantizer: Send + Sync {
+    /// The config/CLI key (`"minmax"`).
+    fn name() -> &'static str
+    where
+        Self: Sized;
+
+    /// The display name (`"MinMax"`). Default: the type's name.
+    fn display_name() -> &'static str
+    where
+        Self: Sized,
+    {
+        type_display_name::<Self>()
+    }
+
+    /// The accepted param names. Default: none.
+    fn params() -> &'static [&'static str]
+    where
+        Self: Sized,
+    {
+        &[]
+    }
+
+    /// One-line pipeline description for `vqb show q`.
+    fn describe() -> &'static str
+    where
+        Self: Sized;
+
+    /// Build from config params; `seed` and `dim` feed seeded and dim-dependent
+    /// stages. Validates its own param *values* (type, range, cross-param) by erroring.
+    fn build(params: &Params, seed: u64, dim: usize) -> Result<Self>
+    where
+        Self: Sized;
+
+    /// Param problems checkable without building: config keys the quantizer doesn't
+    /// accept. Value problems are reported by [`build`](Self::build), not here.
+    fn verify_params(params: &Params) -> Vec<String>
+    where
+        Self: Sized,
+    {
+        params
+            .keys()
+            .filter(|k| !Self::params().contains(&k.as_str()))
+            .map(|k| {
+                format!(
+                    "unknown param `{k}` for quantizer `{}` (accepts: {})",
+                    Self::name(),
+                    Self::params().join(", ")
+                )
+            })
+            .collect()
+    }
+
     /// Learn a model from `vectors` and an optional query sample.
     fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8>;
 
@@ -31,10 +94,23 @@ pub fn byte_split(model: &[u8], codes: &[Vec<u8>]) -> (usize, usize) {
     (model.len(), codes.iter().map(Vec::len).sum())
 }
 
-/// [`Primitive`] implements [`Quantizer`].
-pub struct AsQuantizer<P>(pub P);
+/// A bare [`Pipeline`] run through the [`Quantizer`] interface, for tests and ad-hoc
+/// chains; it has no config identity and cannot be built from params.
+pub struct AsQuantizer(pub Pipeline);
 
-impl<P: Primitive> Quantizer for AsQuantizer<P> {
+impl Quantizer for AsQuantizer {
+    fn name() -> &'static str {
+        "pipeline"
+    }
+
+    fn describe() -> &'static str {
+        "a bare stage pipeline"
+    }
+
+    fn build(_params: &Params, _seed: u64, _dim: usize) -> Result<Self> {
+        Err(anyhow!("a bare pipeline takes no params; wrap one directly"))
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         self.0.fit(vectors, queries)
     }
@@ -44,18 +120,11 @@ impl<P: Primitive> Quantizer for AsQuantizer<P> {
     }
 
     fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        // None: the primitive is the whole chain, so there is no downstream stage
-        // feeding in a child reconstruction — this primitive is terminal.
+        // None: the pipeline is the whole chain — no downstream stage feeds in.
         self.0.reconstruct(model, codes, None)
     }
 
-    fn score(
-        &self,
-        model: &[u8],
-        queries: ArrayView2<f32>,
-        candidate_codes: &[&[u8]],
-    ) -> Array2<f32> {
-        // None: no downstream stage's scores to fold in (see reconstruct).
-        self.0.score(model, queries, candidate_codes, None)
+    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
+        self.0.score(model, queries, codes, None)
     }
 }

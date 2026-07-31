@@ -17,7 +17,7 @@ src/primitives/
   rounders/             casts to a finite codeword set; pass on the residual
   splitters/            fan-out
   catalog.rs            what `vqb show primitives` prints
-src/quantizers/         one file per family, each with a `pub const SPEC`
+src/quantizers/         one file per family, each a `Quantizer` implementor
 src/util/coding.rs      the only place models and codes become bytes
 src/math/               numerical ops; the faer backend stops here
 src/bin/vqb/            the harness -- not touched when adding to the catalog
@@ -101,13 +101,13 @@ rounder.
 3. `impl Primitive`. Required: `apply`, `reconstruct`, `score`. Defaulted — override
    only when the stage needs it: `fit`, `encode`, `apply_queries`, `in_dim`, `out_dim`,
    `code_bytes`. Where a default is deliberately kept, say so in one line
-   (`// encode omitted: a resize owns no per-vector bits.`).
-4. Register in four places, all mechanical:
-   - `mod <name>;` + `pub use <name>::Type;` in the group `mod.rs`
-   - re-export from `src/primitives/mod.rs`
-   - re-export from `src/lib.rs`
-   - a `(TypeName, "lowercase one-line description")` row in the matching group of
-     `src/primitives/catalog.rs`
+   (`// encode omitted: a resize owns no per-vector bits.`). The trait requires
+   `fn describe()` — the lowercase one-line description `vqb show p` prints; the display
+   name defaults to the type's name (`fn name()`, override only if they must differ).
+4. Register in one place: a `module => Type` entry in the group's `primitives! { ... }`
+   list in its `mod.rs` (list position sets the `vqb show p` order). The macro declares
+   the module, glob re-exports it, and collects `name()`/`describe()` into the catalog.
+   `Split` (an adapter, not a cataloged stage) stays a manual `mod`/`pub use` after it.
 5. Tests in an inline `#[cfg(test)] mod tests`. Reuse `crate::util::testing`:
    `assert_pipeline_scores` already checks that `score` matches the exact dot with the
    pipeline's own reconstruction, so most stages need no bespoke harness;
@@ -119,22 +119,34 @@ rounder.
 Copy [`e_rabitq.rs`](src/quantizers/e_rabitq.rs) for a chain,
 [`pq.rs`](src/quantizers/pq.rs) for a fan-out.
 
-1. New `src/quantizers/<key>.rs` holding a `pub const SPEC: QuantizerSpec` (`key`,
-   `family`, `params`, `describe`, `build`) and a builder returning `Result<Pipeline>`.
-2. Add the module name to the `quantizers! { ... }` list in `src/quantizers/mod.rs`.
-   That is the only registration edit — the macro declares the module and collects its
-   `SPEC` into `QUANTIZERS`.
-3. Params: name them in `SPEC.params`, read them with `catalog::get` / `get_or`, and
-   validate *values* in the builder with `ensure!`. Unknown param *names* are caught by
-   `check_params` for free. A param type not yet used means one new `FromParam` impl in
+1. New `src/quantizers/<key>.rs` holding a type that implements `Quantizer`: `name`
+   (the config key), `describe`, `params` (omit if none), `display_name` (omit when
+   it's just the type name), `build`, and `fit`/`encode`/`reconstruct`/`score`. The
+   standard shape is `pub struct <Family>(pub Pipeline);` with the pipeline written
+   directly as `pub fn pipeline(<typed params>, seed, dim) -> Result<Pipeline>` in an
+   inherent impl (value checks live there, so composed uses are validated too);
+   `build` just parses params into it, and the four runtime methods delegate to
+   `self.0` (copy a neighbor). Any direct implementation of the four is equally
+   valid; nothing requires a `Pipeline`.
+2. Add a `module => Type` entry to the `quantizers! { ... }` list in
+   `src/quantizers/mod.rs`. That is the only registration edit — the macro declares the
+   module and collects the type into the registry.
+3. Params: name them in `params()`, read them with `catalog::get` / `get_or`, and
+   validate *values* in `build` with `ensure!`. Unknown param *names* are caught by
+   `verify_params` for free. A param type not yet used means one new `FromParam` impl in
    `src/quantizers/catalog.rs`.
-4. Take the shared `rotation` param (`full` | `hadamard`) and build the stage with
-   `Rotation::stage(dim, seed)` rather than hardcoding a rotation.
+4. Take the shared `rotation` param (`full` | `hadamard`, default `hadamard`) and
+   match it to `RandomRotate::new(seed)` / `RandomHadamard::new(dim, seed)` in `build`
+   (copy a neighbor) rather than hardcoding a rotation.
 5. Fanning out: build one child `Pipeline` per branch, sized by
    `splitter.branch_in_dim(...)`, and wrap the whole thing in a single
    `Split::new(splitter, children)` stage.
-6. Tests: a param-rejection test plus a statistical property test through
-   `AsQuantizer(builder(...))`.
+6. Composing with another family: call its typed `pipeline(...)` and embed the result
+   as a stage (a `Pipeline` is a `Primitive`) — `turboquant_prod` embeds a 1-bit QJL
+   via `Qjl::pipeline(1.0, rotation, seed ^ ..., mid_dim)`.
+7. Tests: a param-rejection test plus a statistical property test, both through
+   `<Family>::build` with a `testing::params(&[("b", json!(4))])` map — the same
+   path configs take.
 
 ## Invariants
 
@@ -168,7 +180,7 @@ single neighbour.
   recovering its width without a child: the `cast_*` family stores the input dim in
   `fit` and calls `super::code_dim`, `Kmeans` reads it off its centroids.
 - **Declare each fact once.** A param's type lives at the `get` call site and is
-  inferred, never restated in `params`; the display name lives in `SPEC.family`, never
+  inferred, never restated in `params()`; the display name lives in `display_name()`, never
   in the builder.
 - **Determinism.** All randomness derives from the run seed via `math::seed(seed)`.
   Never `thread_rng`. Where several sub-quantizers each need a stream, derive them

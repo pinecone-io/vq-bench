@@ -2,11 +2,16 @@
 
 use ndarray::{Array2, ArrayView2};
 
-use crate::{AsQuantizer, Pipeline, Primitive, Quantizer};
+use crate::{AsQuantizer, Params, Pipeline, Primitive, Quantizer};
 
 /// Borrow a slice of owned codes as the `&[&[u8]]` the trait methods expect.
 pub(crate) fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
     codes.iter().map(Vec::as_slice).collect()
+}
+
+/// Build a `Params` map from JSON `(key, value)` pairs, as a config would supply.
+pub(crate) fn params(pairs: &[(&str, serde_json::Value)]) -> Params {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
 }
 
 /// Assert two batches match elementwise within `tol`.

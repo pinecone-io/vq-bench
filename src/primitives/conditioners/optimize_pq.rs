@@ -56,6 +56,10 @@ impl OptimizePq {
 }
 
 impl Primitive for OptimizePq {
+    fn describe() -> &'static str {
+        "learn an orthogonal rotation minimizing product-quantization error"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let d = vectors.ncols();
         let segments = self.segments(d);

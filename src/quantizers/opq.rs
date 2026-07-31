@@ -2,55 +2,101 @@
 //! then PQ (segment split + per-segment k-means) on the rotated data.
 
 use anyhow::{ensure, Result};
+use ndarray::{Array2, ArrayView2};
 
-use super::catalog::{get, QuantizerSpec};
+use super::catalog::get;
 use crate::coding::CodeLayout;
-use crate::{Kmeans, OptimizePq, Pipeline, Primitive, SegmentSplit, Split, Splitter};
-
-pub const SPEC: QuantizerSpec = QuantizerSpec {
-    key: "opq",
-    family: "OPQ",
-    params: &["centroids", "section_dim"],
-    describe: "OptimizePq -> SegmentSplit(section_dim) -> [Kmeans(centroids)]",
-    build: |p, seed, dim| opq(get(p, "centroids")?, get(p, "section_dim")?, seed, dim),
+use crate::{
+    Kmeans, OptimizePq, Params, Pipeline, Primitive, Quantizer, SegmentSplit, Split, Splitter,
 };
 
-/// A learned OPQ rotation, then PQ over `section_dim`-column segments with
-/// `centroids` codewords each (distinct seed per segment).
-pub fn opq(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Pipeline> {
-    ensure!(
-        (2..=1 << CodeLayout::MAX_BITS).contains(&centroids),
-        "centroids must be in 2..={}, got {centroids}",
-        1u32 << CodeLayout::MAX_BITS
-    );
-    ensure!(
-        (1..=dim).contains(&section_dim),
-        "section_dim must be in 1..={dim}, got {section_dim}"
-    );
-    let split = SegmentSplit::new(dim, section_dim);
-    let children = (0..split.n_branches())
-        .map(|b| {
-            Pipeline::new(
-                split.branch_in_dim(&[], dim, b),
-                vec![Box::new(Kmeans::new(centroids, seed.wrapping_add(b as u64))) as Box<dyn Primitive>],
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Pipeline::new(
-        dim,
-        vec![
-            Box::new(OptimizePq::new(centroids, section_dim, seed)),
-            Box::new(Split::new(split, children)),
-        ],
-    )
+/// The `opq` family. A learned OPQ rotation, then PQ over `section_dim`-column
+/// segments with `centroids` codewords each (distinct seed per segment).
+pub struct Opq(pub Pipeline);
+
+impl Opq {
+    /// A learned OPQ rotation, then PQ over `section_dim`-column segments with
+    /// `centroids` codewords each (distinct seed per segment).
+    pub fn pipeline(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Pipeline> {
+        ensure!(
+            (2..=1 << CodeLayout::MAX_BITS).contains(&centroids),
+            "centroids must be in 2..={}, got {centroids}",
+            1u32 << CodeLayout::MAX_BITS
+        );
+        ensure!(
+            (1..=dim).contains(&section_dim),
+            "section_dim must be in 1..={dim}, got {section_dim}"
+        );
+        let split = SegmentSplit::new(dim, section_dim);
+        let children = (0..split.n_branches())
+            .map(|b| {
+                Pipeline::new(
+                    split.branch_in_dim(&[], dim, b),
+                    vec![Box::new(Kmeans::new(centroids, seed.wrapping_add(b as u64))) as Box<dyn Primitive>],
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Pipeline::new(
+            dim,
+            vec![
+                Box::new(OptimizePq::new(centroids, section_dim, seed)),
+                Box::new(Split::new(split, children)),
+            ],
+        )
+    }
+}
+
+impl Quantizer for Opq {
+    fn name() -> &'static str {
+        "opq"
+    }
+
+    fn display_name() -> &'static str {
+        "OPQ"
+    }
+
+    fn params() -> &'static [&'static str] {
+        &["centroids", "section_dim"]
+    }
+
+    fn describe() -> &'static str {
+        "OptimizePq -> SegmentSplit(section_dim) -> [Kmeans(centroids)]"
+    }
+
+    fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
+        Ok(Self(Self::pipeline(get(p, "centroids")?, get(p, "section_dim")?, seed, dim)?))
+    }
+
+    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
+        self.0.fit(vectors, queries)
+    }
+
+    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
+        self.0.encode(model, vectors)
+    }
+
+    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
+        self.0.reconstruct(model, codes, None)
+    }
+
+    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
+        self.0.score(model, queries, codes, None)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::testing::{assert_close, refs};
-    use crate::{math, AsQuantizer, Quantizer};
+    use crate::math;
+    use crate::util::testing::{assert_close, params, refs};
     use ndarray::Array2;
+    use serde_json::json;
+
+    /// The `opq` quantizer over input dim `dim`.
+    fn opq(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Opq> {
+        let p = params(&[("centroids", json!(centroids)), ("section_dim", json!(section_dim))]);
+        Opq::build(&p, seed, dim)
+    }
 
     #[test]
     fn rejects_bad_params() {
@@ -67,7 +113,7 @@ mod tests {
     fn score_matches_reconstruction() {
         let v: Array2<f32> = math::gaussian(&mut math::seed(1), (60, 32));
         let q: Array2<f32> = math::gaussian(&mut math::seed(2), (8, 32));
-        let codec = AsQuantizer(opq(16, 8, 1, 32).unwrap()); // 8-dim segments (4 of them), k=16
+        let codec = opq(16, 8, 1, 32).unwrap(); // 8-dim segments (4 of them), k=16
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
         let r = refs(&codes);

@@ -441,7 +441,7 @@ fn show(what: ShowCmd) -> Result<()> {
     match what {
         ShowCmd::Quantizers => {
             println!("Quantizers:");
-            for q in vqb::catalog::QUANTIZERS {
+            for q in vqb::catalog::quantizers() {
                 println!("  {:<16} {}", q.key, q.describe);
             }
         }
@@ -449,7 +449,7 @@ fn show(what: ShowCmd) -> Result<()> {
             println!("Primitives:");
             for (dir, prims) in vqb::primitive_catalog::groups() {
                 println!("  {dir}");
-                for (p, desc) in *prims {
+                for (p, desc) in prims {
                     println!("    {p:<14} {desc}");
                 }
             }

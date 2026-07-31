@@ -24,6 +24,10 @@ fn scales(codes: &[&[u8]]) -> Array1<f32> {
 }
 
 impl Primitive for AbsMax {
+    fn describe() -> &'static str {
+        "scale each vector into [-1,1] by dividing by max absolute value"
+    }
+
     fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
         let scales = vectors
             .mapv(f32::abs)

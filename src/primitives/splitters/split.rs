@@ -105,6 +105,10 @@ fn unpack_model(model: &[u8], n_children: usize) -> (usize, &[u8], Vec<&[u8]>) {
 }
 
 impl<S: Splitter> Primitive for Split<S> {
+    fn describe() -> &'static str {
+        "a splitter with one child pipeline per branch"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let dim = vectors.ncols();
         let splitter_model = self.splitter.fit(vectors, queries);

@@ -43,6 +43,10 @@ impl RandomRotate {
 }
 
 impl Primitive for RandomRotate {
+    fn describe() -> &'static str {
+        "apply a random orthogonal transformation to all vectors"
+    }
+
     fn fit(&self, _vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         // Store the seed, not the matrix: the seed is the honest, self-describing
         // description of the rotation.

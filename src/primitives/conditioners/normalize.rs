@@ -25,6 +25,10 @@ fn norms(codes: &[&[u8]]) -> Array1<f32> {
 }
 
 impl Primitive for Normalize {
+    fn describe() -> &'static str {
+        "scale each vector to unit L2 norm"
+    }
+
     fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
         let norms = vectors.mapv(|x| x * x).sum_axis(Axis(1)).mapv(f32::sqrt);
         layout().pack_scalars(&[norms.view()])

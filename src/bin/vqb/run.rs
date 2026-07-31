@@ -11,7 +11,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::io::Write;
-use vqb::{NamedQuantizer, Quantizer};
+use vqb::Quantizer;
 
 use crate::config::{ResolvedMethod, RunConfig};
 use crate::dataset::{self, Loaded};
@@ -149,7 +149,7 @@ const ENCODE_CHUNK: usize = 8192;
 /// concatenating the per-vector codes in row order. Chunks are independent (encode is
 /// neighbor-blind), so they run on the rayon pool; the indexed collect keeps row order,
 /// making the output byte-identical to a serial run for any thread count.
-fn encode_in_chunks<Q: Quantizer + Sync>(
+fn encode_in_chunks<Q: Quantizer + ?Sized>(
     q: &Q,
     model: &[u8],
     base: &Array2<f32>,
@@ -278,7 +278,7 @@ fn row_tail(
 #[allow(clippy::too_many_arguments)]
 fn run_method(
     label: String,
-    q: &NamedQuantizer,
+    q: &dyn Quantizer,
     base: &Array2<f32>,
     fit_base: ArrayView2<f32>,
     eval: &Array2<f32>,
@@ -317,7 +317,7 @@ fn run_method(
 #[allow(clippy::too_many_arguments)]
 fn run_method_cached(
     label: String,
-    q: &NamedQuantizer,
+    q: &dyn Quantizer,
     store: codes::CodeStore,
     dim: usize,
     eval: &Array2<f32>,
@@ -351,7 +351,7 @@ fn run_method_cached(
 #[allow(clippy::too_many_arguments)]
 fn score_and_reconstruct(
     label: String,
-    q: &NamedQuantizer,
+    q: &dyn Quantizer,
     model: &[u8],
     n_base: usize,
     dim: usize,
@@ -497,7 +497,7 @@ fn run_dataset<W: std::io::Write>(
     let mut method_results = Vec::with_capacity(methods.len());
     for m in methods {
         let q = factory::build(m, cfg.seed, dim)?;
-        let label = m.label(&q.name); // method name "MinMax (b=2)" from the family name
+        let label = m.label(vqb::catalog::display(&m.name)); // method name "MinMax (b=2)"
         eprint!("  {label:<22}"); // label cell first; metrics fill on completion
         let _ = std::io::stderr().flush();
         // Reuse codes persisted by a prior `vqb encode` when their full identity
@@ -514,12 +514,12 @@ fn run_dataset<W: std::io::Write>(
         // Thread count the cached codes were encoded with (for the reuse note).
         let reused_threads = cached.as_ref().map(codes::CodeStore::threads);
         let rm = match cached {
-            Some(store) => run_method_cached(label, &q, store, dim, &eval, &candidates, &recon_idx),
+            Some(store) => run_method_cached(label, &*q, store, dim, &eval, &candidates, &recon_idx),
             None => {
                 let fit_base = fit_storage.as_ref().map_or_else(|| db.view(), |f| f.view());
                 run_method(
                     label,
-                    &q,
+                    &*q,
                     db,
                     fit_base,
                     &eval,
@@ -706,7 +706,7 @@ fn encode_dataset(
 
     for m in methods {
         let q = factory::build(m, cfg.seed, dim)?;
-        let label = m.label(&q.name);
+        let label = m.label(vqb::catalog::display(&m.name));
         let fit_base = fit_storage.as_ref().map_or_else(|| db.view(), |f| f.view());
         let model = q.fit(fit_base, calib.as_ref().map(|c| c.view()));
 
@@ -745,12 +745,12 @@ fn encode_dataset(
 mod tests {
     use super::*;
 
-    /// Stub quantizer with a content-only, row-independent code (one byte per row),
+    /// Stub stage with a content-only, row-independent code (one byte per row),
     /// so chunked encoding must reproduce the one-shot codes exactly.
     struct RowByte;
-    impl Quantizer for RowByte {
-        fn fit(&self, _v: ArrayView2<f32>, _q: Option<ArrayView2<f32>>) -> Vec<u8> {
-            Vec::new()
+    impl vqb::Primitive for RowByte {
+        fn describe() -> &'static str {
+            "one content byte per row (test stage)"
         }
         fn encode(&self, _m: &[u8], v: ArrayView2<f32>) -> Vec<Vec<u8>> {
             v.rows()
@@ -758,10 +758,17 @@ mod tests {
                 .map(|r| vec![(r.sum() as i64 as i8) as u8])
                 .collect()
         }
-        fn reconstruct(&self, _m: &[u8], _c: &[&[u8]]) -> Array2<f32> {
+        fn apply(&self, _m: &[u8], _v: &mut Array2<f32>, _c: &[&[u8]]) {}
+        fn reconstruct(&self, _m: &[u8], _c: &[&[u8]], _child: Option<ArrayView2<f32>>) -> Array2<f32> {
             Array2::zeros((0, 0))
         }
-        fn score(&self, _m: &[u8], q: ArrayView2<f32>, c: &[&[u8]]) -> Array2<f32> {
+        fn score(
+            &self,
+            _m: &[u8],
+            q: ArrayView2<f32>,
+            c: &[&[u8]],
+            _child: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
             Array2::zeros((q.nrows(), c.len()))
         }
     }
@@ -769,7 +776,7 @@ mod tests {
     #[test]
     fn encode_in_chunks_matches_one_shot() {
         let base = Array2::from_shape_fn((25, 3), |(i, j)| (i * 2 + j) as f32 - 5.0);
-        let q = RowByte;
+        let q = vqb::AsQuantizer(vqb::Pipeline::new(3, vec![Box::new(RowByte)]).unwrap());
         let model = q.fit(base.view(), None);
         let one_shot = q.encode(&model, base.view());
         // Every chunk size (incl. 1, an exact divisor, and larger-than-n) agrees, and

@@ -44,6 +44,10 @@ fn inverse_affine(model: &[u8]) -> (Array1<f32>, Array1<f32>) {
 }
 
 impl Primitive for MinMaxDim {
+    fn describe() -> &'static str {
+        "affine scale each dimension into the target range, calibrated over the fit set"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let min = vectors.map_axis(Axis(0), |c| c.iter().copied().fold(f32::INFINITY, f32::min));
         let max = vectors.map_axis(Axis(0), |c| {

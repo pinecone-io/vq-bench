@@ -37,6 +37,10 @@ impl OptimizeSigns {
 }
 
 impl Primitive for OptimizeSigns {
+    fn describe() -> &'static str {
+        "learn an orthogonal rotation minimizing sign-quantization error"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let d = vectors.ncols();
         let mut rotation = math::random_orthogonal(&mut math::seed(self.seed), d);

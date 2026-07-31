@@ -23,6 +23,10 @@ impl Scale {
 }
 
 impl Primitive for Scale {
+    fn describe() -> &'static str {
+        "apply a fixed affine scaling to every vector"
+    }
+
     fn apply(&self, _model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
         let (scale, offset) = (self.scale, self.offset);
         vectors.mapv_inplace(|x| scale * x + offset);

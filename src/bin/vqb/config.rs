@@ -208,7 +208,7 @@ impl RunConfig {
                 ));
                 continue;
             }
-            problems.extend(vqb::catalog::check_params(&method.name, &method.params));
+            problems.extend(vqb::catalog::verify_params(&method.name, &method.params));
         }
         for metric in &self.metrics {
             if !KNOWN_METRICS.iter().any(|(n, _)| *n == metric) {

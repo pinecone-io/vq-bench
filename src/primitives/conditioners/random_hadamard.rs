@@ -77,6 +77,10 @@ impl RandomHadamard {
 }
 
 impl Primitive for RandomHadamard {
+    fn describe() -> &'static str {
+        "fast near-orthogonal random rotation via the randomized Hadamard transform"
+    }
+
     fn fit(&self, _vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let signs = math::rademacher(&mut math::seed(self.seed), (self.rounds, Self::padded_dim(self.dim)));
         coding::pack_model(signs)

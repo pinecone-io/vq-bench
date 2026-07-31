@@ -56,6 +56,10 @@ impl Kmeans {
 }
 
 impl Primitive for Kmeans {
+    fn describe() -> &'static str {
+        "round to nearest centroid in a learned k-means (Lloyd) codebook"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let centroids = math::lloyd_kmeans(vectors, self.centroids, ITERS, self.seed);
         coding::pack_model((vectors.ncols(), centroids)) // dim first (convention), then centroids

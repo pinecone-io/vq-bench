@@ -2,10 +2,28 @@
 
 use ndarray::{Array2, ArrayView2};
 
+/// A type's display name: the last segment of its path.
+pub(crate) fn type_display_name<T>() -> &'static str {
+    std::any::type_name::<T>().rsplit("::").next().unwrap()
+}
+
 /// One stage of a quantization pipeline. `Send + Sync` so the runner can encode
 /// row chunks across threads (a stage holds only immutable config; models are
 /// passed in as bytes).
 pub trait Primitive: Send + Sync {
+    /// The display name `vqb show p` prints. Default: the type's name.
+    fn name() -> &'static str
+    where
+        Self: Sized,
+    {
+        type_display_name::<Self>()
+    }
+
+    /// One-line description for `vqb show p`.
+    fn describe() -> &'static str
+    where
+        Self: Sized;
+
     /// Learn this stage's model from `vectors` (already transformed by upstream
     /// stages) and an optional query sample. Return the serialized model.
     /// Default: no model — a stateless stage (empty bytes).

@@ -51,6 +51,10 @@ impl SegmentSplit {
 }
 
 impl Splitter for SegmentSplit {
+    fn describe() -> &'static str {
+        "slice each vector into equal-width segments, one branch per segment"
+    }
+
     fn n_branches(&self) -> usize {
         self.widths.len()
     }

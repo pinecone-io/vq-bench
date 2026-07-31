@@ -88,6 +88,10 @@ impl CastAngular {
 }
 
 impl Primitive for CastAngular {
+    fn describe() -> &'static str {
+        "round unit vector to b-bit grid point of minimum angle"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.ncols())
     }

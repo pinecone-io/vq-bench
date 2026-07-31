@@ -43,6 +43,10 @@ impl CastUint {
 }
 
 impl Primitive for CastUint {
+    fn describe() -> &'static str {
+        "round [0,1] into 2^b uniform bins, reconstructing to bin centers"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.ncols())
     }

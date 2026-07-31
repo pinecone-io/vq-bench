@@ -6,6 +6,19 @@ use ndarray::{Array2, ArrayView2};
 /// pieces, quantize each independently, then recombine. `Send + Sync` so a
 /// [`Split`](crate::Split) stage stays thread-safe for the runner's parallel encode.
 pub trait Splitter: Send + Sync {
+    /// The display name `vqb show p` prints. Default: the type's name.
+    fn name() -> &'static str
+    where
+        Self: Sized,
+    {
+        crate::primitive::type_display_name::<Self>()
+    }
+
+    /// One-line description for `vqb show p`.
+    fn describe() -> &'static str
+    where
+        Self: Sized;
+
     /// Number of branches each vector fans out to.
     fn n_branches(&self) -> usize;
 

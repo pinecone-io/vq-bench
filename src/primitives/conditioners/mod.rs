@@ -1,23 +1,13 @@
-mod absmax;
-mod center;
-mod minmax;
-mod minmax_dim;
-mod normalize;
-mod optimize_pq;
-mod optimize_signs;
-mod random_hadamard;
-mod random_rotate;
-mod resize;
-mod scale;
-
-pub use absmax::AbsMax;
-pub use center::Center;
-pub use minmax::MinMax;
-pub use minmax_dim::MinMaxDim;
-pub use normalize::Normalize;
-pub use optimize_pq::OptimizePq;
-pub use optimize_signs::OptimizeSigns;
-pub use random_hadamard::RandomHadamard;
-pub use random_rotate::RandomRotate;
-pub use resize::Resize;
-pub use scale::Scale;
+primitives! { Primitive:
+    minmax => MinMax,
+    minmax_dim => MinMaxDim,
+    absmax => AbsMax,
+    normalize => Normalize,
+    center => Center,
+    scale => Scale,
+    random_rotate => RandomRotate,
+    random_hadamard => RandomHadamard,
+    resize => Resize,
+    optimize_signs => OptimizeSigns,
+    optimize_pq => OptimizePq,
+}

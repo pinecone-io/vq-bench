@@ -1,42 +1,11 @@
-//! The catalog of in-tree primitives — the source of truth for `vqb show p`.
-//! Primitives are grouped by their `src/primitives/` subdirectory, each with a
-//! one-line description. Grows as primitives land.
+//! The catalog of in-tree primitives — what `vqb show p` prints. Each group's rows
+//! are collected by its `primitives!` invocation from the trait's `name()`/`describe()`.
 
 /// Every primitive subdirectory, with its `(name, description)` entries.
-pub fn groups() -> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
-    &[
-        (
-            "conditioners",
-            &[
-                ("MinMax", "affine scale each vector into desired target range"),
-                ("MinMaxDim", "affine scale each dimension into the target range, calibrated over the fit set"),
-                ("AbsMax", "scale each vector into [-1,1] by dividing by max absolute value"),
-                ("Normalize", "scale each vector to unit L2 norm"),
-                ("Center", "subtract the mean over the fit set from every vector"),
-                ("Scale", "apply a fixed affine scaling to every vector"),
-                ("RandomRotate", "apply a random orthogonal transformation to all vectors"),
-                ("RandomHadamard", "fast near-orthogonal random rotation via the randomized Hadamard transform"),
-                ("Resize", "zero-pad or truncate every vector to a fixed number of dimensions"),
-                ("OptimizeSigns", "learn an orthogonal rotation minimizing sign-quantization error"),
-                ("OptimizePq", "learn an orthogonal rotation minimizing product-quantization error"),
-            ],
-        ),
-        (
-            "rounders",
-            &[
-                ("CastUint", "round [0,1] into 2^b uniform bins, reconstructing to bin centers"),
-                ("CastNormal", "round unit vector with b-bit Lloyd-Max normal codebook"),
-                ("CastAngular", "round unit vector to b-bit grid point of minimum angle"),
-                ("CastSign", "round vector to ±1 but leave query unquantized"),
-                ("CastHamming", "round vector and query to ±1"),
-                ("Kmeans", "round to nearest centroid in a learned k-means (Lloyd) codebook"),
-            ],
-        ),
-        (
-            "splitters",
-            &[
-                ("SegmentSplit", "slice each vector into equal-width segments, one branch per segment"),
-            ],
-        ),
+pub fn groups() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    vec![
+        ("conditioners", super::conditioners::catalog()),
+        ("rounders", super::rounders::catalog()),
+        ("splitters", super::splitters::catalog()),
     ]
 }

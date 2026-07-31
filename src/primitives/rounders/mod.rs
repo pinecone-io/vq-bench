@@ -11,16 +11,11 @@ fn code_dim(model: &[u8], child: Option<ArrayView2<f32>>) -> usize {
     child.map_or_else(|| coding::unpack_model::<usize>(model), |c| c.ncols())
 }
 
-mod cast_angular;
-mod cast_hamming;
-mod cast_normal;
-mod cast_sign;
-mod cast_uint;
-mod kmeans;
-
-pub use cast_angular::CastAngular;
-pub use cast_hamming::CastHamming;
-pub use cast_normal::{CastNormal, NormalScale};
-pub use cast_sign::CastSign;
-pub use cast_uint::CastUint;
-pub use kmeans::Kmeans;
+primitives! { Primitive:
+    cast_uint => CastUint,
+    cast_normal => CastNormal,
+    cast_angular => CastAngular,
+    cast_sign => CastSign,
+    cast_hamming => CastHamming,
+    kmeans => Kmeans,
+}

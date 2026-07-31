@@ -18,6 +18,10 @@ fn mean(model: &[u8]) -> Array1<f32> {
 }
 
 impl Primitive for Center {
+    fn describe() -> &'static str {
+        "subtract the mean over the fit set from every vector"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.mean_axis(Axis(0)).unwrap())
     }

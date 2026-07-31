@@ -51,6 +51,10 @@ fn inverse_affine(codes: &[&[u8]]) -> (Array1<f32>, Array1<f32>) {
 }
 
 impl Primitive for MinMax {
+    fn describe() -> &'static str {
+        "affine scale each vector into desired target range"
+    }
+
     fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
         let (min, max) = math::row_minmax(vectors);
         // scale maps [min, max] onto [lo, hi]; a flat vector (span 0) gets scale 0,

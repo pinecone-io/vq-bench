@@ -79,6 +79,10 @@ fn unpack_model(model: &[u8], n_stages: usize) -> Vec<&[u8]> {
 }
 
 impl Primitive for Pipeline {
+    fn describe() -> &'static str {
+        "a chain of primitive stages"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         assert_eq!(
             vectors.ncols(),
@@ -238,6 +242,9 @@ mod tests {
     /// Terminal rounder: one signed byte per dim, lossless on small integers.
     struct IntRound;
     impl Primitive for IntRound {
+        fn describe() -> &'static str {
+            "one signed byte per dim (test stage)"
+        }
         fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
             vectors
                 .rows()
@@ -297,6 +304,9 @@ mod tests {
     /// Conditioner: subtract the per-dim mean; correct scores by `⟨q, μ⟩`.
     struct Center;
     impl Primitive for Center {
+        fn describe() -> &'static str {
+            "subtract the per-dim mean (test stage)"
+        }
         fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
             let mean = vectors.mean_axis(Axis(0)).unwrap();
             mean.iter().flat_map(|m| m.to_le_bytes()).collect()
@@ -349,6 +359,9 @@ mod tests {
     /// Identity conditioner that emits a variable-length code (exercises framing).
     struct VarTag;
     impl Primitive for VarTag {
+        fn describe() -> &'static str {
+            "identity with a variable-length code (test stage)"
+        }
         fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
             (0..vectors.nrows())
                 .map(|i| vec![0xAB; i % 4 + 1])
@@ -380,6 +393,9 @@ mod tests {
     /// A stage pinned to a fixed input dim (exercises the chain dim check).
     struct FixedDim(usize);
     impl Primitive for FixedDim {
+        fn describe() -> &'static str {
+            "identity pinned to a fixed input dim (test stage)"
+        }
         fn apply(&self, _model: &[u8], _vectors: &mut Array2<f32>, _codes: &[&[u8]]) {}
         fn reconstruct(
             &self,

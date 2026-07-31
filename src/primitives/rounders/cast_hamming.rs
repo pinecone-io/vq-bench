@@ -30,6 +30,10 @@ fn decode_unit(codes: &[&[u8]], d: usize) -> Array2<f32> {
 }
 
 impl Primitive for CastHamming {
+    fn describe() -> &'static str {
+        "round vector and query to ±1"
+    }
+
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         coding::pack_model(vectors.ncols())
     }

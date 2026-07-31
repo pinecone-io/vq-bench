@@ -1,7 +1,7 @@
 //! Instantiate a quantizer from a resolved method config, via the catalog registry.
 
 use anyhow::Result;
-use vqb::NamedQuantizer;
+use vqb::Quantizer;
 
 use crate::config::ResolvedMethod;
 
@@ -9,6 +9,6 @@ use crate::config::ResolvedMethod;
 /// master seed (passed to seeded primitives like random rotations); `dim` is the
 /// dataset vector dimension the pipeline is built for (also needed by estimators
 /// whose scale depends on it, e.g. QJL).
-pub fn build(m: &ResolvedMethod, seed: u64, dim: usize) -> Result<NamedQuantizer> {
+pub fn build(m: &ResolvedMethod, seed: u64, dim: usize) -> Result<Box<dyn Quantizer>> {
     vqb::catalog::build(&m.name, &m.params, seed, dim)
 }

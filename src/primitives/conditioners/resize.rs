@@ -42,6 +42,10 @@ impl Resize {
 }
 
 impl Primitive for Resize {
+    fn describe() -> &'static str {
+        "zero-pad or truncate every vector to a fixed number of dimensions"
+    }
+
     // fit omitted: both widths are config, so the model is empty.
 
     // encode omitted: a resize owns no per-vector bits.

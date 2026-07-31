@@ -1,44 +1,81 @@
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
 use anyhow::{ensure, Result};
+use ndarray::{Array2, ArrayView2};
 
-use super::catalog::{get, QuantizerSpec};
+use super::catalog::get;
 use crate::coding::CodeLayout;
-use crate::{CastUint, MinMax, Pipeline};
+use crate::MinMax as MinMaxStage;
+use crate::{CastUint, Params, Pipeline, Primitive, Quantizer};
 
-/// The `minmax` family. `get` type-checks `b` (inferred as `u8` from `minmax`);
-/// value/range checks live in the builder.
-pub const SPEC: QuantizerSpec = QuantizerSpec {
-    key: "minmax",
-    family: "MinMax",
-    params: &["b"],
-    describe: "MinMax -> CastUint(b)",
-    build: |p, _seed, dim| minmax(get(p, "b")?, dim),
-};
+/// The `minmax` family. `get` type-checks `b`; value/range checks live in `build`.
+pub struct MinMax(pub Pipeline);
 
-/// The `minmax` pipeline over input dim `dim`: rescale each vector to `[0, 1]`
-/// (`MinMax`, feeding `CastUint` its expected input range), then a `bits`-bit
-/// uniform lattice (`CastUint`; `bits` is config key `b`).
-pub fn minmax(bits: u8, dim: usize) -> Result<Pipeline> {
-    ensure!(
-        (1..=CodeLayout::MAX_BITS).contains(&bits),
-        "b must be in 1..={}, got {bits}",
-        CodeLayout::MAX_BITS
-    );
-    Pipeline::new(
-        dim,
-        vec![Box::new(MinMax::default()), Box::new(CastUint::new(bits))],
-    )
+impl MinMax {
+    /// Rescale each vector to `[0, 1]` (the MinMax stage, aliased — this family
+    /// shadows its name — feeding `CastUint` its expected input range), then a
+    /// `bits`-bit uniform lattice.
+    pub fn pipeline(bits: u8, dim: usize) -> Result<Pipeline> {
+        ensure!(
+            (1..=CodeLayout::MAX_BITS).contains(&bits),
+            "b must be in 1..={}, got {bits}",
+            CodeLayout::MAX_BITS
+        );
+        Pipeline::new(
+            dim,
+            vec![Box::new(MinMaxStage::default()), Box::new(CastUint::new(bits))],
+        )
+    }
+}
+
+impl Quantizer for MinMax {
+    fn name() -> &'static str {
+        "minmax"
+    }
+
+    fn params() -> &'static [&'static str] {
+        &["b"]
+    }
+
+    fn describe() -> &'static str {
+        "MinMax -> CastUint(b)"
+    }
+
+    fn build(p: &Params, _seed: u64, dim: usize) -> Result<Self> {
+        Ok(Self(Self::pipeline(get(p, "b")?, dim)?))
+    }
+
+    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
+        self.0.fit(vectors, queries)
+    }
+
+    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
+        self.0.encode(model, vectors)
+    }
+
+    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
+        self.0.reconstruct(model, codes, None)
+    }
+
+    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
+        self.0.score(model, queries, codes, None)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AsQuantizer, Quantizer};
+    use crate::util::testing::params;
     use ndarray::{array, Array2};
+    use serde_json::json;
 
     fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
         codes.iter().map(Vec::as_slice).collect()
+    }
+
+    /// The `minmax` quantizer with `b = bits` over input dim `dim`.
+    fn minmax(bits: u8, dim: usize) -> Result<MinMax> {
+        MinMax::build(&params(&[("b", json!(bits))]), 1, dim)
     }
 
     /// `b` out of `1..=8` is a build error (surfaced by `RunConfig::validate`).
@@ -57,7 +94,7 @@ mod tests {
         // No constant rows: a zero-range vector is unrecoverable by `MinMax`.
         let v: Array2<f32> = array![[0., 1., 2.], [4., 2., 0.], [-1., 3., 1.], [2., 0., 3.]];
         let q: Array2<f32> = array![[1., 0., -1.], [0.5, 1., 2.]];
-        let codec = AsQuantizer(minmax(8, 3).unwrap());
+        let codec = minmax(8, 3).unwrap();
 
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
