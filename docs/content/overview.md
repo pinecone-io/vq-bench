@@ -37,3 +37,7 @@ SimHash   = center.normalize.random_rotate.cast_hamming
 E-RaBitQ  = center.normalize.random_rotate.cast_angular
 PQ        = segment_columns.kmeans
 ```
+
+## Contributing to vq-bench
+
+First familiarize yourself with [how to use vq-bench](docs.html#usage). If you would like to contribute, check out the guides on [adding a primitive](docs.html#add-a-primitive) and [adding a quantizer](docs.html#add-a-quantizer).
