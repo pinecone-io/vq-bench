@@ -16,7 +16,7 @@
      identical font-size, and computed style still reports the declared value. 100%
      opts out of the boost while leaving pinch-zoom alone (unlike `none`). */
   html{overflow-y:scroll;-webkit-text-size-adjust:100%;text-size-adjust:100%}
-  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 20%;margin-right:20%;color:#222;padding-bottom:46px;font-size:16px}
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left: 20%;margin-right:20%;color:#222;font-size:16px}
   h1{font-size:17px;margin:10px 14px 2px}
   #benchhead{font-size:26px;font-weight:700;letter-spacing:-0.01em;color:#111;margin:18px 14px 12px}
   #title .meta{font-weight:400;color:#666}
@@ -88,6 +88,11 @@
   #about{padding:4px 14px 16px}
   #sep{border:none;border-top:3px solid #ccc;margin:0 0 4px}
   #about p{font-size:15.5px;line-height:1.55;color:#444;margin:0 0 8px}
+  /* Prose links echo the top nav: quiet at rest, only the hovered link darkens —
+     keeps adjacent links (name + affiliation) individually distinguishable. */
+  #about p a{color:#555;font-weight:500;text-decoration:underline;
+             text-decoration-color:#ccc;text-underline-offset:2px}
+  #about p a:hover{color:#111;text-decoration-color:#555}
   /* Info sections as a clean accordion: a rotating chevron, hairline dividers,
      no uppercase-link styling. */
   #about details{border-top:1px solid #ececec;font-size:14.5px}
@@ -121,11 +126,6 @@
   table.info code{font-size:12px;color:#333;background:#f2f2f4;padding:1px 4px;border-radius:4px}
   table.info a{color:#1f6feb;text-decoration:none}
   table.info a:hover{text-decoration:underline}
-  /* footer */
-  #foot{position:fixed;left:0;right:0;bottom:0;text-align:center;padding:11px 24px;
-        border-top:1px solid #eee;background:#fff;z-index:20}
-  #foot a{font-size:17px;color:#555;text-decoration:none}
-  #foot a:hover{text-decoration:underline;color:#222}
 
   /* ── narrow screens ───────────────────────────────────────────────────────
      Kept last on purpose: a media query adds no specificity, so these only beat
@@ -236,7 +236,7 @@
     </table>
     <p class="note">We also report size and efficiency metrics (bits per dimension, peak / encode memory, encode / scoring time). All time and memory statistics were measured on an Apple M2 Pro with 16GB RAM using 6 threads.</p>
   </details>
-  <p style="margin-top:16px;padding-top:12px"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is actively maintained by Amir Ingber, Edo Liberty (Pinecone), and Ashwin Padaki (UPenn).</p>
+  <p style="margin-top:16px;padding-top:12px"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is actively maintained by <a href="https://scholar.google.com/citations?user=0IkkBzQAAAAJ" target="_blank" rel="noopener">Amir Ingber</a>, <a href="https://edoliberty.com/" target="_blank" rel="noopener">Edo Liberty</a> (<a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a>), and <a href="https://apadaki.github.io/" target="_blank" rel="noopener">Ashwin Padaki</a> (UPenn).</p>
 </section>
 
 <hr id="sep">
@@ -291,8 +291,6 @@
   </div>
   <div class="tscroll"><table id="t"><thead><tr id="hr"></tr></thead><tbody id="tb"></tbody></table></div>
 </section>
-
-<footer id="foot"><a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a></footer>
 
 <script>
 // Stable color per family (family = first whitespace token of the label).
