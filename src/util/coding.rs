@@ -62,12 +62,12 @@ pub(crate) fn pack_model<T: ModelField>(fields: T) -> Vec<u8> {
     buf
 }
 
-/// Read a model back into the requested field type(s). Panics (debug) if bytes
-/// remain, catching a model/reader layout mismatch.
+/// Read a model back into the requested field type(s). Panics if bytes remain,
+/// catching a model/reader layout mismatch -- including a stale cached model.
 pub(crate) fn unpack_model<T: ModelField>(model: &[u8]) -> T {
     let mut cur = model;
     let out = T::read(&mut cur);
-    debug_assert!(cur.is_empty(), "unpack_model: {} trailing bytes", cur.len());
+    assert!(cur.is_empty(), "unpack_model: {} trailing bytes", cur.len());
     out
 }
 

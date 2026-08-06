@@ -125,19 +125,21 @@ Copy [`e_rabitq.rs`](src/quantizers/e_rabitq.rs) for a chain,
    standard shape is `pub struct <Family>(pub Pipeline);` with the pipeline written
    directly as `pub fn pipeline(<typed params>, seed, dim) -> Result<Pipeline>` in an
    inherent impl (value checks live there, so composed uses are validated too);
-   `build` just parses params into it, and the four runtime methods delegate to
-   `self.0` (copy a neighbor). Any direct implementation of the four is equally
-   valid; nothing requires a `Pipeline`.
+   `build` just parses params into it, and `crate::pipeline_quantizer!();` expands the
+   four runtime methods delegating to `self.0`. Nothing requires a `Pipeline` — a
+   non-pipelined quantizer implements the four directly instead of the macro.
 2. Add a `module => Type` entry to the `quantizers! { ... }` list in
    `src/quantizers/mod.rs`. That is the only registration edit — the macro declares the
    module and collects the type into the registry.
 3. Params: name them in `params()`, read them with `catalog::get` / `get_or`, and
    validate *values* in `build` with `ensure!`. Unknown param *names* are caught by
-   `verify_params` for free. A param type not yet used means one new `FromParam` impl in
-   `src/quantizers/catalog.rs`.
-4. Take the shared `rotation` param (`full` | `hadamard`, default `hadamard`) and
-   match it to `RandomRotate::new(seed)` / `RandomHadamard::new(dim, seed)` in `build`
-   (copy a neighbor) rather than hardcoding a rotation.
+   `verify_params` for free. A param type not yet used means one new `FromParam` impl —
+   in `src/quantizers/catalog.rs` for a bare scalar, or beside the type when it has its
+   own module (`Rotation` in `src/quantizers/rotation.rs`).
+4. Take the shared `rotation` param (`full` | `hadamard`, default `hadamard`): read it
+   with `get_or(p, "rotation", Rotation::Hadamard)` and put `rotation.stage(seed)` in
+   the chain rather than hardcoding a rotation. `rotation::rotate_to` is the shared
+   pad-rotate-truncate dance for hitting a coded-dim budget (see `simhash`/`qjl`).
 5. Fanning out: build one child `Pipeline` per branch, sized by
    `splitter.branch_in_dim(...)`, and wrap the whole thing in a single
    `Split::new(splitter, children)` stage.

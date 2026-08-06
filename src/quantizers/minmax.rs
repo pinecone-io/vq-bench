@@ -1,12 +1,11 @@
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
 use anyhow::{ensure, Result};
-use ndarray::{Array2, ArrayView2};
 
 use super::catalog::get;
 use crate::coding::CodeLayout;
 use crate::MinMax as MinMaxStage;
-use crate::{CastUint, Params, Pipeline, Primitive, Quantizer};
+use crate::{CastUint, Params, Pipeline, Quantizer};
 
 /// The `minmax` family. `get` type-checks `b`; value/range checks live in `build`.
 pub struct MinMax(pub Pipeline);
@@ -45,21 +44,7 @@ impl Quantizer for MinMax {
         Ok(Self(Self::pipeline(get(p, "b")?, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

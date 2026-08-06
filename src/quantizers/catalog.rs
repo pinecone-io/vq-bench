@@ -118,12 +118,6 @@ impl FromParam for usize {
     }
 }
 
-impl FromParam for String {
-    fn from_value(v: &Value) -> Result<String> {
-        Ok(v.as_str().context("must be a string")?.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

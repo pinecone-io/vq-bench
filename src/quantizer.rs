@@ -7,7 +7,7 @@ use ndarray::{Array2, ArrayView2};
 use serde_json::Value;
 
 use crate::primitive::type_display_name;
-use crate::{Pipeline, Primitive};
+use crate::Pipeline;
 
 /// A method's config params.
 pub type Params = BTreeMap<String, Value>;
@@ -15,9 +15,9 @@ pub type Params = BTreeMap<String, Value>;
 /// A quantizer: its config identity (key, display name, params, description), how to
 /// build itself from config params, and the runtime interface the harness drives —
 /// `fit`/`encode`/`reconstruct`/`score`. Most quantizers hold a [`Pipeline`] and
-/// implement the four by delegating to it (see [`AsQuantizer`] or any family in
-/// `src/quantizers/`), but any direct implementation is equally valid. `Send + Sync`
-/// so the runner can encode row chunks across threads.
+/// implement the four with [`pipeline_quantizer!`], but any direct implementation is
+/// equally valid — nothing requires a `Pipeline`. `Send + Sync` so the runner can
+/// encode row chunks across threads.
 pub trait Quantizer: Send + Sync {
     /// The config/CLI key (`"minmax"`).
     fn name() -> &'static str
@@ -88,6 +88,41 @@ pub trait Quantizer: Send + Sync {
     ) -> Array2<f32>;
 }
 
+/// Implement the four [`Quantizer`] runtime methods by delegating to the [`Pipeline`]
+/// in `self.0` — the standard `pub struct Family(pub Pipeline);` shape. A family that
+/// computes an operation differently writes that method (or all four) directly.
+macro_rules! pipeline_quantizer {
+    () => {
+        fn fit(
+            &self,
+            vectors: ::ndarray::ArrayView2<f32>,
+            queries: Option<::ndarray::ArrayView2<f32>>,
+        ) -> Vec<u8> {
+            $crate::Primitive::fit(&self.0, vectors, queries)
+        }
+
+        fn encode(&self, model: &[u8], vectors: ::ndarray::ArrayView2<f32>) -> Vec<Vec<u8>> {
+            $crate::Primitive::encode(&self.0, model, vectors)
+        }
+
+        fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> ::ndarray::Array2<f32> {
+            // None: the pipeline is the whole chain -- no downstream stage feeds in.
+            $crate::Primitive::reconstruct(&self.0, model, codes, None)
+        }
+
+        fn score(
+            &self,
+            model: &[u8],
+            queries: ::ndarray::ArrayView2<f32>,
+            codes: &[&[u8]],
+        ) -> ::ndarray::Array2<f32> {
+            $crate::Primitive::score(&self.0, model, queries, codes, None)
+        }
+    };
+}
+
+pub(crate) use pipeline_quantizer;
+
 /// Split total encoded size into `(model bytes, code bytes)`. Owned by the harness,
 /// not the quantizer, so a quantizer can't misreport its own size.
 pub fn byte_split(model: &[u8], codes: &[Vec<u8>]) -> (usize, usize) {
@@ -111,20 +146,5 @@ impl Quantizer for AsQuantizer {
         Err(anyhow!("a bare pipeline takes no params; wrap one directly"))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        // None: the pipeline is the whole chain — no downstream stage feeds in.
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }

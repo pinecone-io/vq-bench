@@ -1,15 +1,12 @@
 //! `turboquant_mse`: unit-normalize, rotate, then a b-bit Gaussian codebook with the
 //! plain (S=1) dequant scale (TurboQuant, MSE variant — EDEN's pipeline, plain scale).
 
-use anyhow::{bail, ensure, Result};
-use ndarray::{Array2, ArrayView2};
+use anyhow::{ensure, Result};
 
 use super::catalog::{get, get_or};
+use super::rotation::Rotation;
 use crate::coding::CodeLayout;
-use crate::{
-    CastNormal, NormalScale, Normalize, Params, Pipeline, Primitive, Quantizer, RandomHadamard,
-    RandomRotate,
-};
+use crate::{CastNormal, NormalScale, Normalize, Params, Pipeline, Quantizer};
 
 /// The `turboquant_mse` family. `get`/`get_or` type-check the params; the `b` range
 /// is checked in `build`.
@@ -17,22 +14,17 @@ pub struct TurboquantMse(pub Pipeline);
 
 impl TurboquantMse {
     /// `Normalize -> rotate(seed) -> CastNormal(b, Plain)` over input dim `dim`.
-    pub fn pipeline(bits: u8, rotation: &str, seed: u64, dim: usize) -> Result<Pipeline> {
+    pub fn pipeline(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(
             (1..=CodeLayout::MAX_BITS).contains(&bits),
             "b must be in 1..={}, got {bits}",
             CodeLayout::MAX_BITS
         );
-        let rotation: Box<dyn Primitive> = match rotation {
-            "full" => Box::new(RandomRotate::new(seed)),
-            "hadamard" => Box::new(RandomHadamard::new(dim, seed)),
-            other => bail!("unknown rotation `{other}` (expected `full` or `hadamard`)"),
-        };
         Pipeline::new(
             dim,
             vec![
                 Box::new(Normalize),
-                rotation,
+                rotation.stage(seed),
                 Box::new(CastNormal::new(bits, NormalScale::Plain)),
             ],
         )
@@ -57,25 +49,11 @@ impl Quantizer for TurboquantMse {
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
-        let rotation = get_or(p, "rotation", "hadamard".to_string())?;
-        Ok(Self(Self::pipeline(get(p, "b")?, &rotation, seed, dim)?))
+        let rotation = get_or(p, "rotation", Rotation::Hadamard)?;
+        Ok(Self(Self::pipeline(get(p, "b")?, rotation, seed, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

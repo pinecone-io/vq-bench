@@ -1,7 +1,7 @@
 //! RANDOM_HADAMARD: near-orthogonal random rotation via the randomized Hadamard
 //! transform (FhtKac): O(d log d) time, O(d) state, vs random_rotate's O(d^2).
 //! -
-//! Model: the ±1 sign vectors, one per round, of length padded_dim
+//! Model: the input dim, plus the ±1 sign vectors, one per round, of length padded_dim
 //! Code for vector x: empty
 //! Apply: x --> R x  (x zero-padded from dim up to a multiple of 64)
 //! Reconstruct: y --> R^T y, cropped back to dim  (R orthonormal)
@@ -17,14 +17,13 @@ const DEFAULT_ROUNDS: usize = 4;
 const PAD_MULTIPLE: usize = 64;
 
 pub struct RandomHadamard {
-    dim: usize,
     seed: u64,
     rounds: usize,
 }
 
 impl RandomHadamard {
-    pub fn new(dim: usize, seed: u64) -> Self {
-        Self { dim, seed, rounds: DEFAULT_ROUNDS }
+    pub fn new(seed: u64) -> Self {
+        Self { seed, rounds: DEFAULT_ROUNDS }
     }
 
     /// `dim` rounded up to a multiple of `PAD_MULTIPLE`: the transform's working width.
@@ -57,8 +56,8 @@ impl RandomHadamard {
     }
 
     /// R: zero-pad, then per round apply the sign flip, Hadamard block, and Kac butterfly.
-    fn forward(&self, signs: &Array2<f32>, x: ArrayView2<f32>) -> Array2<f32> {
-        let (padded, n) = (signs.ncols(), Self::trunc_dim(self.dim));
+    fn forward(dim: usize, signs: &Array2<f32>, x: ArrayView2<f32>) -> Array2<f32> {
+        let (padded, n) = (signs.ncols(), Self::trunc_dim(dim));
         let mut y = Self::pad_cols(x, padded);
         for i in 0..signs.nrows() {
             math::scale_cols(&mut y, signs.row(i));
@@ -70,9 +69,10 @@ impl RandomHadamard {
         y
     }
 
-    fn transform(&self, model: &[u8], m: &mut Array2<f32>) {
-        let signs: Array2<f32> = coding::unpack_model(model);
-        *m = self.forward(&signs, m.view());
+    fn transform(model: &[u8], m: &mut Array2<f32>) {
+        let (dim, signs): (usize, Array2<f32>) = coding::unpack_model(model);
+        assert_eq!(m.ncols(), dim, "RandomHadamard fitted for another dim");
+        *m = Self::forward(dim, &signs, m.view());
     }
 }
 
@@ -81,19 +81,20 @@ impl Primitive for RandomHadamard {
         "fast near-orthogonal random rotation via the randomized Hadamard transform"
     }
 
-    fn fit(&self, _vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        let signs = math::rademacher(&mut math::seed(self.seed), (self.rounds, Self::padded_dim(self.dim)));
-        coding::pack_model(signs)
+    fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
+        let dim = vectors.ncols();
+        let signs = math::rademacher(&mut math::seed(self.seed), (self.rounds, Self::padded_dim(dim)));
+        coding::pack_model((dim, signs))
     }
 
     // encode omitted: the transform owns no per-vector bits.
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
-        self.transform(model, vectors);
+        Self::transform(model, vectors);
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        self.transform(model, queries);
+        Self::transform(model, queries);
     }
 
     fn reconstruct(
@@ -102,8 +103,8 @@ impl Primitive for RandomHadamard {
         _codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let signs: Array2<f32> = coding::unpack_model(model);
-        let n = Self::trunc_dim(self.dim);
+        let (dim, signs): (usize, Array2<f32>) = coding::unpack_model(model);
+        let n = Self::trunc_dim(dim);
         let padded = signs.ncols();
         let mut y = child_recons.expect("RandomHadamard is not terminal").to_owned();
         // Replay the forward ops in reverse; each is its own inverse.
@@ -114,7 +115,7 @@ impl Primitive for RandomHadamard {
             Self::block_hadamard(&mut y, n, i);
             math::scale_cols(&mut y, signs.row(i));
         }
-        y.slice(s![.., ..self.dim]).to_owned()
+        y.slice(s![.., ..dim]).to_owned()
     }
 
     fn score(
@@ -126,10 +127,6 @@ impl Primitive for RandomHadamard {
     ) -> Array2<f32> {
         // Queries are rotated the same way, so the child's scores pass through.
         child_scores.expect("RandomHadamard is not terminal").to_owned()
-    }
-
-    fn in_dim(&self) -> Option<usize> {
-        Some(self.dim)
     }
 
     fn out_dim(&self, in_dim: usize) -> usize {
@@ -150,9 +147,9 @@ mod tests {
     #[test]
     fn deterministic_in_seed() {
         let v = math::gaussian(&mut math::seed(0), (2, 8));
-        let first = RandomHadamard::new(8, 7).fit(v.view(), None);
-        let repeat = RandomHadamard::new(8, 7).fit(v.view(), None);
-        let different = RandomHadamard::new(8, 9).fit(v.view(), None);
+        let first = RandomHadamard::new(7).fit(v.view(), None);
+        let repeat = RandomHadamard::new(7).fit(v.view(), None);
+        let different = RandomHadamard::new(9).fit(v.view(), None);
         assert_eq!(first, repeat);
         assert_ne!(first, different);
     }
@@ -164,7 +161,7 @@ mod tests {
         for d in [128usize, 100] {
             let v = math::gaussian(&mut math::seed(1), (5, d));
             let q = math::gaussian(&mut math::seed(2), (3, d));
-            let rh = RandomHadamard::new(d, 7);
+            let rh = RandomHadamard::new(7);
             let model = rh.fit(v.view(), None);
 
             let mut x = v.clone();
@@ -181,13 +178,22 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "RandomHadamard fitted for another dim")]
+    fn rejects_a_width_the_model_was_not_fitted_for() {
+        // 100 and 120 both pad to 128, so the mismatch would otherwise pass unnoticed.
+        let rh = RandomHadamard::new(7);
+        let model = rh.fit(math::gaussian(&mut math::seed(5), (2, 100)).view(), None);
+        rh.apply(&model, &mut math::gaussian(&mut math::seed(6), (2, 120)), &[]);
+    }
+
+    #[test]
     fn composes_in_pipeline() {
         // hadamard -> minmax -> cast: round-trip within lattice error, exact asymmetric score.
         let v = math::gaussian(&mut math::seed(1), (6, 100));
         let q = math::gaussian(&mut math::seed(2), (3, 100));
         assert_pipeline_scores(
             vec![
-                Box::new(RandomHadamard::new(100, 3)) as Box<dyn Primitive>,
+                Box::new(RandomHadamard::new(3)) as Box<dyn Primitive>,
                 Box::new(MinMax::default()),
                 Box::new(CastUint::new(8)),
             ],

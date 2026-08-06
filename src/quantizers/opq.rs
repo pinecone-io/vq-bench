@@ -2,7 +2,6 @@
 //! then PQ (segment split + per-segment k-means) on the rotated data.
 
 use anyhow::{ensure, Result};
-use ndarray::{Array2, ArrayView2};
 
 use super::catalog::get;
 use crate::coding::CodeLayout;
@@ -67,21 +66,7 @@ impl Quantizer for Opq {
         Ok(Self(Self::pipeline(get(p, "centroids")?, get(p, "section_dim")?, seed, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

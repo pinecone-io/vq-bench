@@ -31,6 +31,8 @@ Required:
 | `reconstruct(model, codes)` | reconstruct one vector per code |
 | `score(model, queries, codes)` | estimate the score of each query against each candidate |
 
+For a pipelined quantizer, `crate::pipeline_quantizer!();` implements `fit`, `encode`, `reconstruct`, and `score` by calling the pipeline (assuming that `self.0` is the quantizer's pipeline object).
+
 Defaulted (override when applicable):
 
 | Method | Default | What it does |
@@ -46,9 +48,9 @@ Most families are a new type over a `Pipeline` of primitives:
 - `pub struct Family(pub Pipeline);`
 - `pub fn pipeline(<typed params>, seed, dim) -> Result<Pipeline>` holds the `ensure!` value checks, so another family composing it is validated the same way. A `Pipeline` is itself a `Primitive`, so you can embed another family's `Other::pipeline(...)?` as a single stage.
 - `build` reads each param with `get(p, "b")?` (the param's type is inferred from `pipeline`'s signature) and wraps the result.
-- The four runtime methods delegate to `self.0`.
+- `crate::pipeline_quantizer!();` expands the four runtime methods, delegating to `self.0`.
 
-Nothing requires a `Pipeline` — any direct implementation of the four runtime methods is equally valid.
+Nothing requires a `Pipeline` — a non-pipelined quantizer skips the macro and implements the four runtime methods directly.
 
 ## Example
 
@@ -58,12 +60,11 @@ Nothing requires a `Pipeline` — any direct implementation of the four runtime 
 //! `minmax`: per-vector rescale to `[0, 1]`, then a `b`-bit uniform lattice.
 
 use anyhow::{ensure, Result};
-use ndarray::{Array2, ArrayView2};
 
 use super::catalog::get;
 use crate::coding::CodeLayout;
 use crate::MinMax as MinMaxStage;
-use crate::{CastUint, Params, Pipeline, Primitive, Quantizer};
+use crate::{CastUint, Params, Pipeline, Quantizer};
 
 /// The `minmax` family. `get` type-checks `b`; value/range checks live in `build`.
 pub struct MinMax(pub Pipeline);
@@ -100,21 +101,7 @@ impl Quantizer for MinMax {
         Ok(Self(Self::pipeline(get(p, "b")?, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 ```
 

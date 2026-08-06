@@ -2,16 +2,13 @@
 //! codebook, one bit reallocated to a 1-bit QJL of the residual for an unbiased
 //! inner-product estimate.
 
-use anyhow::{bail, ensure, Result};
-use ndarray::{Array2, ArrayView2};
+use anyhow::{ensure, Result};
 
 use super::catalog::{get, get_or};
 use super::qjl::Qjl;
+use super::rotation::Rotation;
 use crate::coding::CodeLayout;
-use crate::{
-    CastNormal, NormalScale, Normalize, Params, Pipeline, Primitive, Quantizer, RandomHadamard,
-    RandomRotate,
-};
+use crate::{CastNormal, NormalScale, Normalize, Params, Pipeline, Quantizer};
 
 /// Independent seed offset for the residual's QJL rotation.
 const RESIDUAL_ROTATION_SEED: u64 = 0xD15C0;
@@ -25,17 +22,13 @@ impl TurboquantProd {
     /// `Normalize -> rotate(seed) -> CastNormal(b-1, Plain)`, then a 1-bit QJL of the
     /// residual (same rotation kind, its own seed, at the post-rotation width) —
     /// composed via [`Qjl::pipeline`]; a `Pipeline` is a `Primitive`.
-    pub fn pipeline(bits: u8, rotation: &str, seed: u64, dim: usize) -> Result<Pipeline> {
+    pub fn pipeline(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(
             (2..=CodeLayout::MAX_BITS).contains(&bits),
             "b must be in 2..={}, got {bits}",
             CodeLayout::MAX_BITS
         );
-        let stage: Box<dyn Primitive> = match rotation {
-            "full" => Box::new(RandomRotate::new(seed)),
-            "hadamard" => Box::new(RandomHadamard::new(dim, seed)),
-            other => bail!("unknown rotation `{other}` (expected `full` or `hadamard`)"),
-        };
+        let stage = rotation.stage(seed);
         let mid_dim = stage.out_dim(dim); // width the residual lives in (padded under Hadamard)
         let residual = Qjl::pipeline(1.0, rotation, seed ^ RESIDUAL_ROTATION_SEED, mid_dim)?;
         Pipeline::new(
@@ -68,25 +61,11 @@ impl Quantizer for TurboquantProd {
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
-        let rotation = get_or(p, "rotation", "hadamard".to_string())?;
-        Ok(Self(Self::pipeline(get(p, "b")?, &rotation, seed, dim)?))
+        let rotation = get_or(p, "rotation", Rotation::Hadamard)?;
+        Ok(Self(Self::pipeline(get(p, "b")?, rotation, seed, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

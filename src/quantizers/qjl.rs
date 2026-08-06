@@ -1,15 +1,11 @@
 //! `qjl`: unit-normalize, rotate into `b*dim` dimensions, then 1-bit signs — an unbiased
 //! inner-product estimate (CastSign's sqrt(pi/2m) scale corrects the sign estimator's bias).
 
-use anyhow::{bail, ensure, Result};
-use ndarray::{Array2, ArrayView2};
+use anyhow::{ensure, Result};
 
 use super::catalog::get_or;
-use super::simhash::coded_dim;
-use crate::{
-    CastSign, Normalize, Params, Pipeline, Primitive, Quantizer, RandomHadamard, RandomRotate,
-    Resize,
-};
+use super::rotation::{coded_dim, rotate_to, Rotation};
+use crate::{CastSign, Normalize, Params, Pipeline, Primitive, Quantizer};
 
 /// The `qjl` family. The projection count `m = b*dim` is QJL's native bit budget;
 /// CastSign scores with the QJL scale sqrt(pi/2m) on the width it is handed, so the
@@ -18,24 +14,10 @@ pub struct Qjl(pub Pipeline);
 
 impl Qjl {
     /// `Normalize -> rotate(seed) to m = b*dim dims -> CastSign` over input dim `dim`.
-    pub fn pipeline(bits: f32, rotation: &str, seed: u64, dim: usize) -> Result<Pipeline> {
+    pub fn pipeline(bits: f32, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(bits.is_finite() && bits > 0.0, "b must be positive, got {bits}");
-        let m = coded_dim(bits, dim);
-        let wide = dim.max(m);
-        let stage: Box<dyn Primitive> = match rotation {
-            "full" => Box::new(RandomRotate::new(seed)),
-            "hadamard" => Box::new(RandomHadamard::new(wide, seed)),
-            other => bail!("unknown rotation `{other}` (expected `full` or `hadamard`)"),
-        };
-        let rotated = stage.out_dim(wide); // padded to a multiple of 64 under Hadamard
         let mut stages: Vec<Box<dyn Primitive>> = vec![Box::new(Normalize)];
-        if wide != dim {
-            stages.push(Box::new(Resize::new(dim, wide))); // pad up, so the added dims rotate in
-        }
-        stages.push(stage);
-        if m != dim && rotated != m {
-            stages.push(Box::new(Resize::new(rotated, m))); // truncate down to the budget
-        }
+        stages.extend(rotate_to(rotation, seed, dim, coded_dim(bits, dim)));
         stages.push(Box::new(CastSign));
         Pipeline::new(dim, stages)
     }
@@ -59,25 +41,11 @@ impl Quantizer for Qjl {
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
-        let rotation = get_or(p, "rotation", "hadamard".to_string())?;
-        Ok(Self(Self::pipeline(get_or(p, "b", 1.0f32)?, &rotation, seed, dim)?))
+        let rotation = get_or(p, "rotation", Rotation::Hadamard)?;
+        Ok(Self(Self::pipeline(get_or(p, "b", 1.0f32)?, rotation, seed, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

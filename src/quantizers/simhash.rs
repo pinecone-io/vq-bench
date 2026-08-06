@@ -1,14 +1,11 @@
 //! `simhash`: center, unit-normalize, rotate into `b*dim` dimensions, then 1-bit signs
 //! scored by a Hamming-angle inner-product estimate.
 
-use anyhow::{bail, ensure, Result};
-use ndarray::{Array2, ArrayView2};
+use anyhow::{ensure, Result};
 
 use super::catalog::get_or;
-use crate::{
-    CastHamming, Center, Normalize, Params, Pipeline, Primitive, Quantizer, RandomHadamard,
-    RandomRotate, Resize,
-};
+use super::rotation::{coded_dim, rotate_to, Rotation};
+use crate::{CastHamming, Center, Normalize, Params, Pipeline, Primitive, Quantizer};
 
 /// The `simhash` family. One sign bit per coded dimension, so `b` bits per input
 /// dimension means `m = b*dim` random hyperplanes; `b` may be fractional.
@@ -17,24 +14,10 @@ pub struct SimHash(pub Pipeline);
 impl SimHash {
     /// `Center -> Normalize -> rotate(seed) to m = b*dim dims -> CastHamming` over
     /// input dim `dim`.
-    pub fn pipeline(bits: f32, rotation: &str, seed: u64, dim: usize) -> Result<Pipeline> {
+    pub fn pipeline(bits: f32, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(bits.is_finite() && bits > 0.0, "b must be positive, got {bits}");
-        let m = coded_dim(bits, dim);
-        let wide = dim.max(m);
-        let stage: Box<dyn Primitive> = match rotation {
-            "full" => Box::new(RandomRotate::new(seed)),
-            "hadamard" => Box::new(RandomHadamard::new(wide, seed)),
-            other => bail!("unknown rotation `{other}` (expected `full` or `hadamard`)"),
-        };
-        let rotated = stage.out_dim(wide); // padded to a multiple of 64 under Hadamard
         let mut stages: Vec<Box<dyn Primitive>> = vec![Box::new(Center), Box::new(Normalize)];
-        if wide != dim {
-            stages.push(Box::new(Resize::new(dim, wide))); // pad up, so the added dims rotate in
-        }
-        stages.push(stage);
-        if m != dim && rotated != m {
-            stages.push(Box::new(Resize::new(rotated, m))); // truncate down to the budget
-        }
+        stages.extend(rotate_to(rotation, seed, dim, coded_dim(bits, dim)));
         stages.push(Box::new(CastHamming));
         Pipeline::new(dim, stages)
     }
@@ -54,31 +37,11 @@ impl Quantizer for SimHash {
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
-        let rotation = get_or(p, "rotation", "hadamard".to_string())?;
-        Ok(Self(Self::pipeline(get_or(p, "b", 1.0f32)?, &rotation, seed, dim)?))
+        let rotation = get_or(p, "rotation", Rotation::Hadamard)?;
+        Ok(Self(Self::pipeline(get_or(p, "b", 1.0f32)?, rotation, seed, dim)?))
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
-        self.0.fit(vectors, queries)
-    }
-
-    fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        self.0.encode(model, vectors)
-    }
-
-    fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
-        self.0.reconstruct(model, codes, None)
-    }
-
-    fn score(&self, model: &[u8], queries: ArrayView2<f32>, codes: &[&[u8]]) -> Array2<f32> {
-        self.0.score(model, queries, codes, None)
-    }
-}
-
-/// Coded dims for a budget of `bits` sign bits per input dim: `m == dim` at `b == 1`,
-/// which leaves the rotation's own width (pad included) untouched.
-pub(super) fn coded_dim(bits: f32, dim: usize) -> usize {
-    ((bits * dim as f32).round() as usize).max(1)
+    crate::pipeline_quantizer!();
 }
 
 #[cfg(test)]

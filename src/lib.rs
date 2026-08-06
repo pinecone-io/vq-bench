@@ -12,6 +12,7 @@ mod quantizers;
 mod splitter;
 mod util;
 
+pub(crate) use quantizer::pipeline_quantizer;
 pub(crate) use util::{codebooks, coding};
 
 pub use math::matmul;

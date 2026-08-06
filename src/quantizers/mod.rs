@@ -1,6 +1,7 @@
 //! Quantizers: the in-tree catalog the harness runs.
 
 pub mod catalog;
+mod rotation;
 
 /// Register the in-tree quantizer families: declare each `module => Type` and collect
 /// it into the registry. Add a family by writing its module (a type implementing

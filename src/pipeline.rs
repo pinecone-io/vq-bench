@@ -110,7 +110,11 @@ impl Primitive for Pipeline {
 
     fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
         let models = unpack_model(model, self.stages.len());
-        debug_assert_eq!(vectors.ncols(), self.in_dims[0]);
+        assert_eq!(
+            vectors.ncols(),
+            self.in_dims[0],
+            "pipeline built for another dim"
+        );
         let mut v = vectors.to_owned();
         let mut combined = vec![Vec::new(); vectors.nrows()];
         let last = self.stages.len() - 1;
