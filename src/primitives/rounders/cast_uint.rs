@@ -99,7 +99,7 @@ impl Primitive for CastUint {
         out
     }
 
-    fn code_bytes(&self, in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], in_dim: usize) -> Option<usize> {
         Some(self.layout(in_dim).byte_len())
     }
 }
@@ -150,7 +150,7 @@ mod tests {
         for bits in [1u8, 2, 4, 5, 8] {
             let cast = CastUint::new(bits);
             let codes = cast.encode(&cast.fit(v.view(), None), v.view());
-            assert_eq!(codes[0].len(), cast.code_bytes(5).unwrap());
+            assert_eq!(codes[0].len(), cast.code_bytes(&[], 5).unwrap());
             assert_eq!(codes[0].len(), (5 * bits as usize).div_ceil(8));
         }
     }

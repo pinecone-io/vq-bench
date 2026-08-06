@@ -156,7 +156,7 @@ impl Primitive for CastAngular {
         out
     }
 
-    fn code_bytes(&self, in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], in_dim: usize) -> Option<usize> {
         Some(self.layout(in_dim).byte_len())
     }
 }
@@ -223,7 +223,7 @@ mod tests {
         for bits in [1u8, 2, 4, 8] {
             let cast = CastAngular::new(bits);
             let codes = cast.encode(&cast.fit(o.view(), None), o.view());
-            assert_eq!(codes[0].len(), cast.code_bytes(5).unwrap());
+            assert_eq!(codes[0].len(), cast.code_bytes(&[], 5).unwrap());
             assert_eq!(codes[0].len(), (5 * bits as usize).div_ceil(8) + 4);
         }
     }

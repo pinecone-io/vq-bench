@@ -105,7 +105,7 @@ impl Primitive for MinMax {
         out
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(layout().byte_len())
     }
 }

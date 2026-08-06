@@ -86,7 +86,7 @@ impl Primitive for OptimizeSigns {
         child_scores.expect("OptimizeSigns is not terminal").to_owned()
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0) // no per-vector bits: the rotation lives in the model
     }
 }

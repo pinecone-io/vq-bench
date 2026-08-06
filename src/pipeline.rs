@@ -33,12 +33,13 @@ impl Pipeline {
     }
 
     /// Split each combined per-vector code into one slice per stage.
-    fn split_codes<'a>(&self, combined: &[&'a [u8]]) -> Vec<Vec<&'a [u8]>> {
+    fn split_codes<'a>(&self, models: &[&[u8]], combined: &[&'a [u8]]) -> Vec<Vec<&'a [u8]>> {
         let lens: Vec<Option<usize>> = self
             .stages
             .iter()
+            .zip(models)
             .zip(&self.in_dims)
-            .map(|(s, &d)| s.code_bytes(d))
+            .map(|((s, &m), &d)| s.code_bytes(m, d))
             .collect();
         let mut out: Vec<Vec<&'a [u8]>> = (0..self.stages.len())
             .map(|_| Vec::with_capacity(combined.len()))
@@ -120,7 +121,7 @@ impl Primitive for Pipeline {
         let last = self.stages.len() - 1;
         for (i, stage) in self.stages.iter().enumerate() {
             let codes = stage.encode(models[i], v.view());
-            match stage.code_bytes(self.in_dims[i]) {
+            match stage.code_bytes(models[i], self.in_dims[i]) {
                 Some(n) => {
                     for (out, code) in combined.iter_mut().zip(&codes) {
                         debug_assert_eq!(code.len(), n);
@@ -144,7 +145,7 @@ impl Primitive for Pipeline {
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, codes: &[&[u8]]) {
         let models = unpack_model(model, self.stages.len());
-        let stage_codes = self.split_codes(codes);
+        let stage_codes = self.split_codes(&models, codes);
         for (i, stage) in self.stages.iter().enumerate() {
             stage.apply(models[i], vectors, &stage_codes[i]);
         }
@@ -164,7 +165,7 @@ impl Primitive for Pipeline {
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
         let models = unpack_model(model, self.stages.len());
-        let stage_codes = self.split_codes(codes);
+        let stage_codes = self.split_codes(&models, codes);
         let mut downstream = child_recons.map(|c| c.to_owned());
         for i in (0..self.stages.len()).rev() {
             let child = downstream.as_ref().map(|a| a.view());
@@ -181,7 +182,7 @@ impl Primitive for Pipeline {
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
         let models = unpack_model(model, self.stages.len());
-        let stage_codes = self.split_codes(codes);
+        let stage_codes = self.split_codes(&models, codes);
 
         // Forward: the query batch each stage sees.
         let mut stage_queries = Vec::with_capacity(self.stages.len());
@@ -218,12 +219,18 @@ impl Primitive for Pipeline {
         self.stages[last].out_dim(self.in_dims[last])
     }
 
-    fn code_bytes(&self, in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, model: &[u8], in_dim: usize) -> Option<usize> {
         debug_assert_eq!(in_dim, self.in_dims[0]);
+        // A stage's layout may live in its model, so an unfitted chain has no answer.
+        if model.is_empty() {
+            return None;
+        }
+        let models = unpack_model(model, self.stages.len());
         self.stages
             .iter()
+            .zip(&models)
             .zip(&self.in_dims)
-            .map(|(s, &d)| s.code_bytes(d))
+            .map(|((s, &m), &d)| s.code_bytes(m, d))
             .sum()
     }
 }
@@ -300,7 +307,7 @@ mod tests {
             }
             out
         }
-        fn code_bytes(&self, in_dim: usize) -> Option<usize> {
+        fn code_bytes(&self, _model: &[u8], in_dim: usize) -> Option<usize> {
             Some(in_dim)
         }
     }
@@ -355,7 +362,7 @@ mod tests {
             }
             out
         }
-        fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+        fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
             Some(0)
         }
     }
@@ -389,7 +396,7 @@ mod tests {
         ) -> Array2<f32> {
             child_scores.expect("vartag is not terminal").to_owned()
         }
-        fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+        fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
             None
         }
     }
@@ -421,7 +428,7 @@ mod tests {
         fn in_dim(&self) -> Option<usize> {
             Some(self.0)
         }
-        fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+        fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
             Some(0)
         }
     }

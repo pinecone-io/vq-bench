@@ -1,13 +1,11 @@
 //! `opq`: Optimized Product Quantization — learn a rotation minimizing PQ error,
 //! then PQ (segment split + per-segment k-means) on the rotated data.
 
-use anyhow::{ensure, Result};
+use anyhow::Result;
 
 use super::catalog::get;
-use crate::coding::CodeLayout;
-use crate::{
-    Kmeans, OptimizePq, Params, Pipeline, Primitive, Quantizer, SegmentSplit, Split, Splitter,
-};
+use super::pq::Pq;
+use crate::{OptimizePq, Params, Pipeline, Quantizer};
 
 /// The `opq` family. A learned OPQ rotation, then PQ over `section_dim`-column
 /// segments with `centroids` codewords each (distinct seed per segment).
@@ -15,32 +13,13 @@ pub struct Opq(pub Pipeline);
 
 impl Opq {
     /// A learned OPQ rotation, then PQ over `section_dim`-column segments with
-    /// `centroids` codewords each (distinct seed per segment).
+    /// `centroids` codewords each (distinct seed per segment) — composed via
+    /// [`Pq::pipeline`], which also validates the params.
     pub fn pipeline(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Pipeline> {
-        ensure!(
-            (2..=1 << CodeLayout::MAX_BITS).contains(&centroids),
-            "centroids must be in 2..={}, got {centroids}",
-            1u32 << CodeLayout::MAX_BITS
-        );
-        ensure!(
-            (1..=dim).contains(&section_dim),
-            "section_dim must be in 1..={dim}, got {section_dim}"
-        );
-        let split = SegmentSplit::new(dim, section_dim);
-        let children = (0..split.n_branches())
-            .map(|b| {
-                Pipeline::new(
-                    split.branch_in_dim(&[], dim, b),
-                    vec![Box::new(Kmeans::new(centroids, seed.wrapping_add(b as u64))) as Box<dyn Primitive>],
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let pq = Pq::pipeline(centroids, section_dim, seed, dim)?;
         Pipeline::new(
             dim,
-            vec![
-                Box::new(OptimizePq::new(centroids, section_dim, seed)),
-                Box::new(Split::new(split, children)),
-            ],
+            vec![Box::new(OptimizePq::new(centroids, section_dim, seed)), Box::new(pq)],
         )
     }
 }

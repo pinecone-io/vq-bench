@@ -110,7 +110,7 @@ impl Primitive for Kmeans {
         out
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(self.layout().byte_len()) // one packed centroid index
     }
 }
@@ -164,7 +164,7 @@ mod tests {
         let v = data();
         let km = Kmeans::new(4, 7); // 4 centroids -> 2-bit index
         let codes = km.encode(&km.fit(v.view(), None), v.view());
-        assert_eq!(codes[0].len(), km.code_bytes(3).unwrap());
+        assert_eq!(codes[0].len(), km.code_bytes(&[], 3).unwrap());
         assert_eq!(codes[0].len(), 1);
     }
 }

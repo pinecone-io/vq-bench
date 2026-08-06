@@ -140,9 +140,10 @@ Copy [`e_rabitq.rs`](src/quantizers/e_rabitq.rs) for a chain,
    with `get_or(p, "rotation", Rotation::Hadamard)` and put `rotation.stage(seed)` in
    the chain rather than hardcoding a rotation. `rotation::rotate_to` is the shared
    pad-rotate-truncate dance for hitting a coded-dim budget (see `simhash`/`qjl`).
-5. Fanning out: build one child `Pipeline` per branch, sized by
-   `splitter.branch_in_dim(...)`, and wrap the whole thing in a single
-   `Split::new(splitter, children)` stage.
+5. Fanning out: wrap a splitter in a single
+   `Split::from_factory(splitter, |branch, branch_dim| ...)` stage. The factory builds
+   each branch's child pipeline from the **fitted** layout, so a splitter may learn its
+   branch widths from the data (`branch_in_dim` reads them off its model).
 6. Composing with another family: call its typed `pipeline(...)` and embed the result
    as a stage (a `Pipeline` is a `Primitive`) — `turboquant_prod` embeds a 1-bit QJL
    via `Qjl::pipeline(1.0, rotation, seed ^ ..., mid_dim)`.
@@ -159,9 +160,11 @@ single neighbour.
   holds only configuration; anything learned from data goes into the model bytes, where
   `byte_split` can charge for it. State smuggled into the struct is a size metric that
   lies.
-- **`code_bytes` depends on dim and config only, never on data.** The pipeline uses it
-  to split each combined code into per-stage slices, so a data-dependent answer
-  corrupts every downstream stage.
+- **`code_bytes` depends on the model, dim, and config — never on the vector batch.**
+  The pipeline uses it (with each stage's fitted model in hand) to split each combined
+  code into per-stage slices, so an answer that varies row to row corrupts every
+  downstream stage. A stage whose layout is learned at fit returns `None` on an empty
+  (unfitted) model.
 - **Score from codes, not decoded values.** In `score`, dot the query against the packed
   integer levels and correct algebraically — `cast_uint.rs` uses
   `<q, center(c)> = (<q,c> + 0.5*sum(q)) / N`. Decoding back to f32 in the hot path

@@ -59,7 +59,7 @@ impl Primitive for Scale {
         out
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0)
     }
 }

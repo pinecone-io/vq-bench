@@ -5,7 +5,7 @@ use anyhow::{ensure, Result};
 
 use super::catalog::get;
 use crate::coding::CodeLayout;
-use crate::{Kmeans, Params, Pipeline, Primitive, Quantizer, SegmentSplit, Split, Splitter};
+use crate::{Kmeans, Params, Pipeline, Primitive, Quantizer, SegmentSplit, Split};
 
 /// The `pq` family. Contiguous `section_dim`-column segments (dimension-independent),
 /// each rounded to its own `centroids`-codeword k-means codebook (distinct seed per
@@ -25,16 +25,14 @@ impl Pq {
             (1..=dim).contains(&section_dim),
             "section_dim must be in 1..={dim}, got {section_dim}"
         );
-        let split = SegmentSplit::new(dim, section_dim);
-        let children = (0..split.n_branches())
-            .map(|b| {
-                Pipeline::new(
-                    split.branch_in_dim(&[], dim, b),
-                    vec![Box::new(Kmeans::new(centroids, seed.wrapping_add(b as u64))) as Box<dyn Primitive>],
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Pipeline::new(dim, vec![Box::new(Split::new(split, children))])
+        let split = Split::from_factory(SegmentSplit::new(dim, section_dim), move |b, branch_dim| {
+            let rounder = Kmeans::new(centroids, seed.wrapping_add(b as u64));
+            // Kmeans declares no in_dim, so the only way Pipeline::new can fail here is
+            // a stage that disagrees with its input dim -- unreachable for this chain.
+            Pipeline::new(branch_dim, vec![Box::new(rounder) as Box<dyn Primitive>])
+                .expect("a dim-generic stage cannot mismatch its input dim")
+        });
+        Pipeline::new(dim, vec![Box::new(split)])
     }
 }
 

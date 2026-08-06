@@ -121,7 +121,7 @@ impl Primitive for OptimizePq {
         child_scores.expect("OptimizePq is not terminal").to_owned()
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0) // no per-vector bits: the rotation lives in the model
     }
 }
@@ -130,7 +130,7 @@ impl Primitive for OptimizePq {
 mod tests {
     use super::*;
     use crate::util::testing::{assert_close, refs};
-    use crate::{AsQuantizer, Kmeans, Pipeline, Quantizer, SegmentSplit, Split, Splitter};
+    use crate::{AsQuantizer, Kmeans, Pipeline, Quantizer, SegmentSplit, Split};
     use ndarray::Array2;
 
     /// Low-rank (strongly correlated) data, where a decorrelating rotation helps PQ.
@@ -198,23 +198,17 @@ mod tests {
         // against the pipeline's own reconstruction.
         let v = correlated(60, 16, 2);
         let q = math::gaussian(&mut math::seed(3), (5, 16));
-        let split = SegmentSplit::new(16, 4);
-        let children = (0..split.n_branches())
-            .map(|b| {
-                Pipeline::new(
-                    split.branch_in_dim(&[], 16, b),
-                    vec![Box::new(Kmeans::new(16, 42 + b as u64)) as Box<dyn Primitive>],
-                )
-                .unwrap()
-            })
-            .collect();
+        let split = Split::from_factory(SegmentSplit::new(16, 4), |b, branch_dim| {
+            Pipeline::new(
+                branch_dim,
+                vec![Box::new(Kmeans::new(16, 42 + b as u64)) as Box<dyn Primitive>],
+            )
+            .unwrap()
+        });
         let codec = AsQuantizer(
             Pipeline::new(
                 16,
-                vec![
-                    Box::new(OptimizePq::new(16, 4, 1)) as Box<dyn Primitive>,
-                    Box::new(Split::new(split, children)),
-                ],
+                vec![Box::new(OptimizePq::new(16, 4, 1)) as Box<dyn Primitive>, Box::new(split)],
             )
             .unwrap(),
         );

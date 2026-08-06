@@ -34,8 +34,8 @@ pub trait Splitter: Send + Sync {
     }
 
     /// Fixed byte length of the node's own per-vector code, or `None` if it
-    /// varies.
-    fn code_bytes(&self, in_dim: usize) -> Option<usize>;
+    /// varies or is unknown until fit (empty model).
+    fn code_bytes(&self, model: &[u8], in_dim: usize) -> Option<usize>;
 
     /// Split the vectors into one sub-batch per branch.
     fn apply(&self, model: &[u8], vectors: ArrayView2<f32>, codes: &[&[u8]]) -> Vec<Array2<f32>>;

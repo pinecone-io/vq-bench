@@ -105,7 +105,7 @@ impl Quantizer for MinMax {
 }
 ```
 
-For a fan-out family (one sub-pipeline per vector segment), copy `src/quantizers/pq.rs` instead: it builds a splitter, one child pipeline per branch, and wraps them in a single `Split` stage.
+For a fan-out family (one sub-pipeline per vector segment), copy `src/quantizers/pq.rs` instead: it wraps a splitter and a per-branch child factory in a single `Split::from_factory` stage — children are built from the fitted layout, so a splitter may learn its branch widths from the data.
 
 The new family is immediately selectable from a run configuration — `"name"` matches `name()`, sibling keys must appear in `params()`, and an array sweeps that param:
 

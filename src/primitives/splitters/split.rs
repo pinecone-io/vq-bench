@@ -1,60 +1,91 @@
 //! `Split`: adapts a [`Splitter`] + one child [`Pipeline`] per branch into a single
 //! terminal [`Primitive`], so fan-out drops into a pipeline chain like any other stage.
 
+use std::sync::OnceLock;
+
 use ndarray::{Array2, ArrayView2};
 
 use crate::coding::{put_len, take, take_len};
 use crate::{Pipeline, Primitive, Splitter};
 
-/// A fan-out stage: the splitter slices each vector into branches, and `children[i]`
-/// quantizes branch `i`. `Split` is **terminal** -- it owns no downstream stage, and
-/// every method runs the per-branch work internally and recombines (mirroring how
-/// [`Pipeline`] itself implements [`Primitive`]). Non-terminal fan-out is unsupported.
+/// A fan-out stage: the splitter slices each vector into branches, and one child
+/// pipeline quantizes each branch. Children come from `factory(branch, branch_dim)`
+/// against the **fitted** layout, so a splitter may learn its branch widths from the
+/// data. `Split` is **terminal** -- it owns no downstream stage, and every method runs
+/// the per-branch work internally and recombines (mirroring how [`Pipeline`] itself
+/// implements [`Primitive`]). Non-terminal fan-out is unsupported.
 pub struct Split<S: Splitter> {
     splitter: S,
-    children: Vec<Pipeline>,
+    factory: Box<dyn Fn(usize, usize) -> Pipeline + Send + Sync>,
+    /// The child pipelines, with the branch layout they were built for.
+    children: OnceLock<(Vec<usize>, Vec<Pipeline>)>,
 }
 
 impl<S: Splitter> Split<S> {
-    /// One child pipeline per branch (`children.len()` must equal `splitter.n_branches()`).
-    pub fn new(splitter: S, children: Vec<Pipeline>) -> Self {
-        assert_eq!(
-            children.len(),
-            splitter.n_branches(),
-            "one child pipeline per branch"
-        );
-        Self { splitter, children }
+    /// A `Split` whose children are built from the fitted layout:
+    /// `factory(branch, branch_dim)` runs once the splitter's model -- hence each
+    /// branch's dim -- exists.
+    ///
+    /// The factory must be deterministic in `(branch, branch_dim)`. A fresh process
+    /// rebuilds the children from persisted model bytes, so determinism here is what
+    /// keeps `model + codes + config` sufficient to decode.
+    pub fn from_factory<F>(splitter: S, factory: F) -> Self
+    where
+        F: Fn(usize, usize) -> Pipeline + Send + Sync + 'static,
+    {
+        Self { splitter, factory: Box::new(factory), children: OnceLock::new() }
     }
 
     /// Per-branch input dim, by branch order.
     fn branch_dims(&self, splitter_model: &[u8], in_dim: usize) -> Vec<usize> {
-        (0..self.children.len())
+        (0..self.splitter.n_branches())
             .map(|b| self.splitter.branch_in_dim(splitter_model, in_dim, b))
             .collect()
     }
 
-    /// Fixed code width of each component (splitter, then each child), or `None` if
-    /// that component is variable-width.
-    fn component_lens(&self, splitter_model: &[u8], in_dim: usize) -> Vec<Option<usize>> {
-        let mut lens = vec![self.splitter.code_bytes(in_dim)];
-        for (b, &branch_dim) in self.branch_dims(splitter_model, in_dim).iter().enumerate() {
-            lens.push(self.children[b].code_bytes(branch_dim));
+    /// The child pipelines for branch layout `dims`, built on first use.
+    ///
+    /// A stage sees one (model, dim) for its lifetime, so one build suffices -- but the
+    /// cache records the layout it was built for and holds every later call to it
+    /// rather than trusting that. Always checked, not `debug_assert`: benchmarks run in
+    /// release, and children sized for a stale layout would report wrong numbers
+    /// instead of failing.
+    fn children(&self, dims: &[usize]) -> &[Pipeline] {
+        let (built_for, children) = self.children.get_or_init(|| {
+            let built = dims.iter().enumerate().map(|(b, &d)| (self.factory)(b, d)).collect();
+            (dims.to_vec(), built)
+        });
+        assert_eq!(built_for.as_slice(), dims, "Split children built for another layout");
+        children
+    }
+
+    /// The child pipelines for the fitted layout, plus each component's fixed code
+    /// width (the splitter's, then one per branch); `None` marks a variable-width
+    /// component. The single place the branch layout is derived.
+    fn children_and_lens(
+        &self,
+        splitter_model: &[u8],
+        child_models: &[&[u8]],
+        in_dim: usize,
+    ) -> (&[Pipeline], Vec<Option<usize>>) {
+        let dims = self.branch_dims(splitter_model, in_dim);
+        let children = self.children(&dims);
+        let mut lens = vec![self.splitter.code_bytes(splitter_model, in_dim)];
+        for (b, &branch_dim) in dims.iter().enumerate() {
+            lens.push(children[b].code_bytes(child_models[b], branch_dim));
         }
-        lens
+        (children, lens)
     }
 
     /// Peel each combined per-vector code into the splitter's slice plus one slice
     /// per child branch, framing exactly as [`Pipeline`] does (fixed width or length
     /// prefix). Returns `(splitter_codes, per_branch_codes)`.
     fn split_codes<'a>(
-        &self,
-        splitter_model: &[u8],
-        in_dim: usize,
+        lens: &[Option<usize>],
         combined: &[&'a [u8]],
     ) -> (Vec<&'a [u8]>, Vec<Vec<&'a [u8]>>) {
-        let lens = self.component_lens(splitter_model, in_dim);
         let mut splitter_codes = Vec::with_capacity(combined.len());
-        let mut branch_codes: Vec<Vec<&[u8]>> = (0..self.children.len())
+        let mut branch_codes: Vec<Vec<&[u8]>> = (0..lens.len() - 1)
             .map(|_| Vec::with_capacity(combined.len()))
             .collect();
         for code in combined {
@@ -116,8 +147,9 @@ impl<S: Splitter> Primitive for Split<S> {
         let splitter_refs: Vec<&[u8]> = splitter_codes.iter().map(Vec::as_slice).collect();
         let sub_vectors = self.splitter.apply(&splitter_model, vectors, &splitter_refs);
         let sub_queries = queries.map(|q| self.splitter.apply_queries(&splitter_model, q));
+        let dims = self.branch_dims(&splitter_model, dim);
         let child_models = self
-            .children
+            .children(&dims)
             .iter()
             .enumerate()
             .map(|(b, child)| {
@@ -131,7 +163,8 @@ impl<S: Splitter> Primitive for Split<S> {
     }
 
     fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
-        let (_, splitter_model, child_models) = unpack_model(model, self.children.len());
+        let (dim, splitter_model, child_models) = unpack_model(model, self.splitter.n_branches());
+        assert_eq!(dim, vectors.ncols(), "Split fitted for another dim");
         let splitter_codes = self.splitter.encode(splitter_model, vectors);
         let splitter_refs: Vec<&[u8]> = splitter_codes.iter().map(Vec::as_slice).collect();
         let sub_vectors = self.splitter.apply(splitter_model, vectors, &splitter_refs);
@@ -139,12 +172,12 @@ impl<S: Splitter> Primitive for Split<S> {
         // Frame each component per vector -- splitter code, then each branch's code, raw
         // when fixed-width and length-prefixed otherwise (matching Pipeline). Branches are
         // appended as they are encoded, so only one branch's codes is held at a time.
-        let lens = self.component_lens(splitter_model, vectors.ncols());
+        let (children, lens) = self.children_and_lens(splitter_model, &child_models, dim);
         let mut combined = vec![Vec::new(); vectors.nrows()];
         for (out, splitter_code) in combined.iter_mut().zip(&splitter_codes) {
             append_component(out, lens[0], splitter_code);
         }
-        for (b, child) in self.children.iter().enumerate() {
+        for (b, child) in children.iter().enumerate() {
             let child_codes = child.encode(child_models[b], sub_vectors[b].view());
             for (out, code) in combined.iter_mut().zip(&child_codes) {
                 append_component(out, lens[b + 1], code);
@@ -168,10 +201,10 @@ impl<S: Splitter> Primitive for Split<S> {
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
         debug_assert!(child_recons.is_none(), "Split is terminal");
-        let (dim, splitter_model, child_models) = unpack_model(model, self.children.len());
-        let (splitter_codes, branch_codes) = self.split_codes(splitter_model, dim, codes);
-        let recons: Vec<Array2<f32>> = self
-            .children
+        let (dim, splitter_model, child_models) = unpack_model(model, self.splitter.n_branches());
+        let (children, lens) = self.children_and_lens(splitter_model, &child_models, dim);
+        let (splitter_codes, branch_codes) = Self::split_codes(&lens, codes);
+        let recons: Vec<Array2<f32>> = children
             .iter()
             .enumerate()
             .map(|(b, child)| child.reconstruct(child_models[b], &branch_codes[b], None))
@@ -187,11 +220,11 @@ impl<S: Splitter> Primitive for Split<S> {
         child_scores: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
         debug_assert!(child_scores.is_none(), "Split is terminal");
-        let (dim, splitter_model, child_models) = unpack_model(model, self.children.len());
-        let (splitter_codes, branch_codes) = self.split_codes(splitter_model, dim, codes);
+        let (dim, splitter_model, child_models) = unpack_model(model, self.splitter.n_branches());
+        let (children, lens) = self.children_and_lens(splitter_model, &child_models, dim);
+        let (splitter_codes, branch_codes) = Self::split_codes(&lens, codes);
         let sub_queries = self.splitter.apply_queries(splitter_model, queries);
-        let scores: Vec<Array2<f32>> = self
-            .children
+        let scores: Vec<Array2<f32>> = children
             .iter()
             .enumerate()
             .map(|(b, child)| {
@@ -207,10 +240,16 @@ impl<S: Splitter> Primitive for Split<S> {
         in_dim
     }
 
-    fn code_bytes(&self, in_dim: usize) -> Option<usize> {
-        // Sums the splitter's own code with each child's. Relies on branch_in_dim being
-        // model-independent (true for segment); a model-dependent splitter returns None.
-        self.component_lens(&[], in_dim).into_iter().sum()
+    fn code_bytes(&self, model: &[u8], in_dim: usize) -> Option<usize> {
+        // Sums the splitter's own code with each child's. The branch layout can live in
+        // the fitted splitter model, so pre-fit there is no answer -- and answering it
+        // would seed the child cache from a layout that does not exist yet.
+        if model.is_empty() {
+            return None;
+        }
+        let (dim, splitter_model, child_models) = unpack_model(model, self.splitter.n_branches());
+        assert_eq!(dim, in_dim, "Split fitted for another dim");
+        self.children_and_lens(splitter_model, &child_models, in_dim).1.into_iter().sum()
     }
 }
 
@@ -223,4 +262,171 @@ fn append_component(out: &mut Vec<u8>, len: Option<usize>, code: &[u8]) {
         debug_assert_eq!(len, Some(code.len()));
     }
     out.extend_from_slice(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::testing::{assert_close, refs};
+    use crate::{coding, math, Kmeans};
+    use ndarray::{s, Axis};
+
+    /// Two branches whose boundary is learned at fit: the split lands just after the
+    /// highest-variance column, so the branch widths live in the model.
+    struct VarSplit;
+
+    impl VarSplit {
+        fn boundary(model: &[u8]) -> usize {
+            coding::unpack_model(model)
+        }
+    }
+
+    impl Splitter for VarSplit {
+        fn describe() -> &'static str {
+            "split after the highest-variance column (fitted layout)"
+        }
+
+        fn n_branches(&self) -> usize {
+            2
+        }
+
+        fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
+            let var = vectors.var_axis(Axis(0), 0.0);
+            let argmax = (0..var.len()).max_by(|&a, &b| var[a].total_cmp(&var[b])).unwrap();
+            coding::pack_model((argmax + 1).min(vectors.ncols() - 1))
+        }
+
+        fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
+            Some(0)
+        }
+
+        fn apply(
+            &self,
+            model: &[u8],
+            vectors: ArrayView2<f32>,
+            _codes: &[&[u8]],
+        ) -> Vec<Array2<f32>> {
+            let k = Self::boundary(model);
+            vec![vectors.slice(s![.., ..k]).to_owned(), vectors.slice(s![.., k..]).to_owned()]
+        }
+
+        fn apply_queries(&self, model: &[u8], queries: ArrayView2<f32>) -> Vec<Array2<f32>> {
+            let k = Self::boundary(model);
+            vec![queries.slice(s![.., ..k]).to_owned(), queries.slice(s![.., k..]).to_owned()]
+        }
+
+        fn reconstruct(
+            &self,
+            model: &[u8],
+            _codes: &[&[u8]],
+            child_recons: &[Array2<f32>],
+        ) -> Array2<f32> {
+            let k = Self::boundary(model);
+            let mut out =
+                Array2::zeros((child_recons[0].nrows(), k + child_recons[1].ncols()));
+            out.slice_mut(s![.., ..k]).assign(&child_recons[0]);
+            out.slice_mut(s![.., k..]).assign(&child_recons[1]);
+            out
+        }
+
+        fn score(
+            &self,
+            _model: &[u8],
+            _codes: &[&[u8]],
+            _query: ArrayView2<f32>,
+            child_scores: &[Array2<f32>],
+        ) -> Array2<f32> {
+            &child_scores[0] + &child_scores[1]
+        }
+
+        fn branch_in_dim(&self, model: &[u8], in_dim: usize, branch: usize) -> usize {
+            let k = Self::boundary(model);
+            if branch == 0 { k } else { in_dim - k }
+        }
+    }
+
+    /// A `Split` over `VarSplit` with one k-means branch each.
+    fn var_split() -> Split<VarSplit> {
+        Split::from_factory(VarSplit, |b, branch_dim| {
+            Pipeline::new(
+                branch_dim,
+                vec![Box::new(Kmeans::new(8, 42 + b as u64)) as Box<dyn Primitive>],
+            )
+            .unwrap()
+        })
+    }
+
+    /// Column 0 has by far the highest variance, so the fitted boundary is 1: branch
+    /// widths 1 and 5 -- unequal, and knowable only after fit.
+    fn skewed() -> Array2<f32> {
+        let mut v = math::gaussian(&mut math::seed(1), (50, 6));
+        v.column_mut(0).mapv_inplace(|x| 10.0 * x);
+        v
+    }
+
+    #[test]
+    fn fitted_branch_widths_round_trip() {
+        let v = skewed();
+        let q = math::gaussian(&mut math::seed(2), (4, 6));
+        let split = var_split();
+
+        // The layout is unknown pre-fit and exact once the model exists.
+        assert_eq!(split.code_bytes(&[], 6), None);
+        let model = split.fit(v.view(), None);
+        let codes = split.encode(&model, v.view());
+        let r = refs(&codes);
+        assert_eq!(split.code_bytes(&model, 6), Some(codes[0].len()));
+
+        let recon = split.reconstruct(&model, &r, None);
+        assert_eq!(recon.dim(), (50, 6));
+        // Kmeans scores exactly against its own centroids, so the combined score is the
+        // exact dot with the combined reconstruction.
+        assert_close(&split.score(&model, q.view(), &r, None), &q.dot(&recon.t()), 1e-3);
+    }
+
+    #[test]
+    #[should_panic(expected = "Split children built for another layout")]
+    fn a_second_layout_is_rejected_not_silently_reused() {
+        // Refitting one stage under a different learned layout would otherwise reuse
+        // children sized for the first. Widths go from (1, 5) to (5, 1).
+        let split = var_split();
+        let mut other = math::gaussian(&mut math::seed(3), (50, 6));
+        other.column_mut(4).mapv_inplace(|x| 10.0 * x);
+        split.fit(skewed().view(), None);
+        split.fit(other.view(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Split fitted for another dim")]
+    fn rejects_a_width_the_model_was_not_fitted_for() {
+        // The model carries the dim its branch widths were derived from, so a batch of
+        // another width would split codes on a layout that never described it.
+        let split = var_split();
+        let model = split.fit(skewed().view(), None);
+        split.encode(&model, math::gaussian(&mut math::seed(4), (50, 8)).view());
+    }
+
+    #[test]
+    fn a_fresh_split_decodes_a_persisted_model() {
+        // The size-honesty invariant for a learned layout: model + codes + config must
+        // suffice. A second Split, built from config alone, rebuilds its children from
+        // the persisted model bytes and must agree exactly -- the unit-level mirror of
+        // the harness's run-from-stored-codes path.
+        let v = skewed();
+        let q = math::gaussian(&mut math::seed(2), (4, 6));
+
+        let (model, codes) = {
+            let split = var_split();
+            let model = split.fit(v.view(), None);
+            let codes = split.encode(&model, v.view());
+            (model, codes)
+        };
+
+        let fresh = var_split();
+        let r = refs(&codes);
+        assert_eq!(fresh.code_bytes(&model, 6), Some(codes[0].len()));
+        assert_eq!(fresh.encode(&model, v.view()), codes);
+        let recon = fresh.reconstruct(&model, &r, None);
+        assert_close(&fresh.score(&model, q.view(), &r, None), &q.dot(&recon.t()), 1e-3);
+    }
 }

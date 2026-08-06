@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 const MAGIC: &[u8; 4] = b"VQCS";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 /// Size of the fixed-length header span (identity + the patched width/stats +
 /// `threads`), i.e. everything before the length-prefixed `label` and `model`.

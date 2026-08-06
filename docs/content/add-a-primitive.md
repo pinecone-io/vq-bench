@@ -35,7 +35,7 @@ Defaulted (override when applicable):
 | `fit(vectors, queries)` | empty model | store learned information into a model |
 | `encode(model, vectors)` | empty code per vector | generate per-vector bits |
 | `apply_queries(model, queries)` | identity | transform the batch of queries into what downstream stages see |
-| `code_bytes(in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed |
+| `code_bytes(model, in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed; `None` on an empty model when the layout is learned at fit |
 | `in_dim()` / `out_dim(in_dim)` | unchanged | specifies the input and output dimensionality of the primitive |
 
 ## Example
@@ -100,7 +100,7 @@ impl Primitive for Center {
         out
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0)
     }
 }

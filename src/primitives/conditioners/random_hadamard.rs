@@ -133,7 +133,7 @@ impl Primitive for RandomHadamard {
         Self::padded_dim(in_dim)
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0) // no per-vector bits: the signs live in the model
     }
 }

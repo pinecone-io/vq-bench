@@ -147,7 +147,7 @@ Defaulted (override when applicable):
 | `fit(vectors, queries)` | empty model | store learned information into a model |
 | `encode(model, vectors)` | empty code per vector | generate per-vector bits |
 | `apply_queries(model, queries)` | identity | transform the batch of queries into what downstream stages see |
-| `code_bytes(in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed |
+| `code_bytes(model, in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed; `None` on an empty model when the layout is learned at fit |
 | `in_dim()` / `out_dim(in_dim)` | unchanged | specifies the input and output dimensionality of the primitive |
 
 #### Example
@@ -212,7 +212,7 @@ impl Primitive for Center {
         out
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0)
     }
 }
@@ -337,7 +337,7 @@ impl Quantizer for MinMax {
 }
 ```
 
-For a fan-out family (one sub-pipeline per vector segment), copy `src/quantizers/pq.rs` instead: it builds a splitter, one child pipeline per branch, and wraps them in a single `Split` stage.
+For a fan-out family (one sub-pipeline per vector segment), copy `src/quantizers/pq.rs` instead: it wraps a splitter and a per-branch child factory in a single `Split::from_factory` stage — children are built from the fitted layout, so a splitter may learn its branch widths from the data.
 
 The new family is immediately selectable from a run configuration — `"name"` matches `name()`, sibling keys must appear in `params()`, and an array sweeps that param:
 

@@ -71,9 +71,12 @@ pub trait Primitive: Send + Sync {
     }
 
     /// Fixed byte length of this stage's per-vector code, or `None` if it varies
-    /// (the caller then length-prefixes it). Depends only on dim and
-    /// configuration, never on data.
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    /// (the caller then length-prefixes it). Depends on the model, dim, and
+    /// configuration -- never on the vector batch, since one answer frames every
+    /// row. A stage whose layout is learned at fit answers `None` for an empty
+    /// (unfitted) model; `&[]` is a safe sentinel because a fitted `Pipeline` or
+    /// `Split` model always carries at least one 4-byte component length.
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         None
     }
 }

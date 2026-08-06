@@ -75,7 +75,7 @@ impl Primitive for CastSign {
         out
     }
 
-    fn code_bytes(&self, in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], in_dim: usize) -> Option<usize> {
         Some(layout(in_dim).byte_len())
     }
 }
@@ -117,7 +117,7 @@ mod tests {
         let v = array![[0.1, -0.2, 0.3, 0.4, -0.5]]; // d = 5
         let cast = CastSign;
         let codes = cast.encode(&cast.fit(v.view(), None), v.view());
-        assert_eq!(codes[0].len(), cast.code_bytes(5).unwrap());
+        assert_eq!(codes[0].len(), cast.code_bytes(&[], 5).unwrap());
         assert_eq!(codes[0].len(), 5usize.div_ceil(8)); // 1 byte
     }
 

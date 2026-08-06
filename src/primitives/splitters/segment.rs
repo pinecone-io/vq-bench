@@ -61,7 +61,7 @@ impl Splitter for SegmentSplit {
 
     // fit / encode use the trait defaults (no model, empty per-vector code).
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0)
     }
 

@@ -94,7 +94,7 @@ impl Primitive for Resize {
         self.out_dim
     }
 
-    fn code_bytes(&self, _in_dim: usize) -> Option<usize> {
+    fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
         Some(0)
     }
 }
@@ -115,7 +115,7 @@ mod tests {
         let v = array![[1., 2., 3., 4.]];
         let rs = Resize::to(8);
         assert_eq!(rs.fit(v.view(), None).len(), 4);
-        assert_eq!(rs.code_bytes(4), Some(0));
+        assert_eq!(rs.code_bytes(&[], 4), Some(0));
         assert_eq!(rs.in_dim(), None);
         assert_eq!(rs.out_dim(4), 8);
     }
