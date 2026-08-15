@@ -76,6 +76,9 @@ enum Command {
     Encode {
         /// Path to the experiment JSON.
         config: PathBuf,
+        /// Encode from scratch, overwriting any stored codes instead of skipping them.
+        #[arg(long)]
+        fresh: bool,
     },
     /// Recompute metrics from a prior run's `.raw` outputs.
     Eval { config: PathBuf, raw_dir: PathBuf },
@@ -154,7 +157,7 @@ fn main() -> Result<()> {
             dry_run,
             fresh,
         } => run(&config, dry_run, fresh),
-        Command::Encode { config } => encode(&config),
+        Command::Encode { config, fresh } => encode(&config, fresh),
         Command::Eval { config, raw_dir } => eval(&config, &raw_dir),
         Command::Merge { inputs, out } => merge::merge(&inputs, out.as_deref()),
         Command::View {
@@ -296,19 +299,19 @@ fn real_run(_path: &Path, _fresh: bool) -> Result<()> {
     bail!("`vqb run` needs the hdf5 feature; rebuild with default features")
 }
 
-fn encode(path: &Path) -> Result<()> {
+fn encode(path: &Path, fresh: bool) -> Result<()> {
     let cfg = RunConfig::parse(path)?;
     config::require_valid(&cfg)?;
-    real_encode(path)
+    real_encode(path, fresh)
 }
 
 #[cfg(feature = "hdf5")]
-fn real_encode(path: &Path) -> Result<()> {
-    run::encode_to_disk(path)
+fn real_encode(path: &Path, fresh: bool) -> Result<()> {
+    run::encode_to_disk(path, fresh)
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn real_encode(_path: &Path) -> Result<()> {
+fn real_encode(_path: &Path, _fresh: bool) -> Result<()> {
     bail!("`vqb encode` needs the hdf5 feature; rebuild with default features")
 }
 

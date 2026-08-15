@@ -61,6 +61,28 @@ fn slug(label: &str) -> String {
         .collect()
 }
 
+/// What determines a code file's contents, minus the method label: the header
+/// fields a stored file must match before `run` may reuse it or `encode` may skip
+/// rewriting it. Derivable from a dataset's shapes, so the check can precede the load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Identity {
+    pub seed: u64,
+    pub n_base: usize,
+    pub dim: usize,
+    pub n_fit: usize,
+    pub n_calib: usize,
+}
+
+impl Identity {
+    /// The stored codes for `dataset` × `label` matching this identity, if any. A
+    /// missing, corrupt, or truncated file is a clean miss (`open` validates).
+    pub fn stored(&self, dataset: &str, label: &str) -> Option<CodeStore> {
+        CodeStore::open(&path_for(dataset, label))
+            .ok()
+            .filter(|s| s.matches(self, label))
+    }
+}
+
 // --- writer ----------------------------------------------------------------
 
 /// Streams per-vector codes to disk, one chunk at a time, patching the header
@@ -280,21 +302,12 @@ impl CodeStore {
     }
 
     /// Whether this file was written for the given code-determining identity.
-    #[allow(clippy::too_many_arguments)]
-    pub fn matches(
-        &self,
-        seed: u64,
-        n_base: usize,
-        dim: usize,
-        n_fit: usize,
-        n_calib: usize,
-        label: &str,
-    ) -> bool {
-        self.seed == seed
-            && self.n == n_base
-            && self.dim == dim
-            && self.n_fit == n_fit
-            && self.n_calib == n_calib
+    pub fn matches(&self, id: &Identity, label: &str) -> bool {
+        self.seed == id.seed
+            && self.n == id.n_base
+            && self.dim == id.dim
+            && self.n_fit == id.n_fit
+            && self.n_calib == id.n_calib
             && self.label == label
     }
 
@@ -367,13 +380,21 @@ mod tests {
         assert_eq!(code_bytes, 30);
 
         let store = CodeStore::open(&path).unwrap();
-        assert!(store.matches(123, 10, 4, 8, 5, "MinMax (b=2)"));
+        let id = Identity {
+            seed: 123,
+            n_base: 10,
+            dim: 4,
+            n_fit: 8,
+            n_calib: 5,
+        };
+        assert!(store.matches(&id, "MinMax (b=2)"));
         // Any component of the identity differing rejects the cache.
-        assert!(!store.matches(123, 10, 8, 8, 5, "MinMax (b=2)")); // dim
-        assert!(!store.matches(999, 10, 4, 8, 5, "MinMax (b=2)")); // seed
-        assert!(!store.matches(123, 10, 4, 7, 5, "MinMax (b=2)")); // n_fit
-        assert!(!store.matches(123, 10, 4, 8, 6, "MinMax (b=2)")); // n_calib
-        assert!(!store.matches(123, 10, 4, 8, 5, "MinMax (b=4)")); // label
+        assert!(!store.matches(&Identity { dim: 8, ..id }, "MinMax (b=2)"));
+        assert!(!store.matches(&Identity { seed: 999, ..id }, "MinMax (b=2)"));
+        assert!(!store.matches(&Identity { n_base: 9, ..id }, "MinMax (b=2)"));
+        assert!(!store.matches(&Identity { n_fit: 7, ..id }, "MinMax (b=2)"));
+        assert!(!store.matches(&Identity { n_calib: 6, ..id }, "MinMax (b=2)"));
+        assert!(!store.matches(&id, "MinMax (b=4)"));
         assert_eq!(store.model(), &[7, 8, 9]);
         assert_eq!(store.encode_s(), 1.5);
         assert_eq!(store.encode_peak_bytes(), 4096);
@@ -384,6 +405,35 @@ mod tests {
             assert_eq!(store.get(i).unwrap(), codes[i]);
         }
         std::fs::remove_file(&path).ok();
+    }
+
+    /// `stored` is what `run` reuses and `encode` skips on, so it must hit only on a
+    /// full identity match and treat anything else — absent file, wrong seed — as a miss.
+    #[test]
+    fn stored_hits_only_on_a_full_identity_match() {
+        let ds = "__vqb_test_stored";
+        let label = "MinMax (b=2)";
+        let id = Identity {
+            seed: 5,
+            n_base: 3,
+            dim: 2,
+            n_fit: 3,
+            n_calib: 0,
+        };
+        assert!(id.stored(ds, label).is_none(), "no file yet");
+
+        let path = path_for(ds, label);
+        let mut w = CodeWriter::create(&path, 5, 2, 3, 3, 0, 1, label, &[]).unwrap();
+        w.push_chunk(&[vec![1, 2], vec![3, 4], vec![5, 6]]).unwrap();
+        w.finish(0.0, 0).unwrap();
+
+        assert!(id.stored(ds, label).is_some());
+        assert!(id.stored(ds, "MinMax (b=4)").is_none(), "label");
+        assert!(
+            Identity { seed: 6, ..id }.stored(ds, label).is_none(),
+            "seed"
+        );
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
     #[test]

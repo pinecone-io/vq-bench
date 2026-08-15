@@ -98,6 +98,7 @@ expensive fit + encode once, and `eval` recomputes the metrics from an existing 
 ```bash
 vqb run    <config> --fresh    # re-encode from scratch, ignoring any cached codes
 vqb encode <config>            # cache codes to results/codes/ for a later run to reuse
+vqb encode <config> --fresh    # re-encode from scratch, overwriting cached codes
 vqb eval   <config> <raw>      # recompute metrics directly from a prior run's .raw
 vqb merge  <a> <b>             # combine JSON results files
 ```

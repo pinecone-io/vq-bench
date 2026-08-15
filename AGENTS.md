@@ -54,8 +54,10 @@ Artifacts land under `results/`: `<exp>.json` (aggregated), `raw/<exp>.raw` (the
 `vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`) is
 a fixed-width file whose header records everything determining the codes — dataset,
 method label, `seed`, `n_base`, `n_fit`, `n_calib` — so `run` can safely reuse a prior
-`encode`'s output, and refuses when the identity doesn't match. `--fresh` ignores stores
-entirely.
+`encode`'s output, and refuses when the identity doesn't match. `encode` checks the same
+identity to skip work it has already done, cheaply enough (from the dataset's shapes)
+that an all-cached dataset is never even loaded. `--fresh` ignores stores entirely, on
+both commands.
 
 Three things the **harness** owns, deliberately kept out of quantizers:
 

@@ -389,6 +389,27 @@ pub fn array_shapes(path: &Path) -> Result<Vec<ArrayShape>> {
         .collect()
 }
 
+/// The row/column counts a code file's identity is derived from.
+pub struct Shapes {
+    pub base_rows: usize,
+    pub dim: usize,
+    /// `None` when the dataset has no `calib`.
+    pub calib_rows: Option<usize>,
+}
+
+/// The identity-determining shapes, read from the HDF5 metadata without loading any
+/// rows — so `encode` can find it has nothing to do before paying a multi-GB read.
+pub fn identity_shapes(path: &Path) -> Result<Shapes> {
+    let shapes = array_shapes(path)?;
+    let of = |want| shapes.iter().find(|(n, _)| *n == want).and_then(|&(_, s)| s);
+    let (base_rows, dim) = of("base").context("dataset `base` is missing")?;
+    Ok(Shapes {
+        base_rows,
+        dim,
+        calib_rows: of("calib").map(|(rows, _)| rows),
+    })
+}
+
 /// Recompute `eval_candidates` at width `l` from the stored `base`/`eval`. Reads the
 /// existing file read-only and writes a fresh one atomically (see `write_dataset`), so
 /// an interrupted recompute leaves the previous dataset intact rather than corrupting
