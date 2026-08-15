@@ -11,7 +11,7 @@ const DEFAULT_DATA_DIR: &str = "data";
 const VIBE_BASE: &str = "https://huggingface.co/datasets/vector-index-bench/vibe/resolve/main";
 
 /// A known dataset: a short name, its dimensionality, and where it comes from.
-/// All vq-bench sets are normalized and scored by dot product.
+/// Every set is scored by dot product; most are normalized, the `-ip` ones are not.
 pub struct Dataset {
     pub name: &'static str,
     pub dim: usize,
@@ -67,6 +67,21 @@ pub const DATASETS: &[Dataset] = &[
     Dataset {
         name: "laion-clip-512-normalized",
         dim: 512,
+        source: "VIBE",
+    },
+    Dataset {
+        name: "landmark-nomic-768-normalized",
+        dim: 768,
+        source: "VIBE",
+    },
+    Dataset {
+        name: "imagenet-clip-512-normalized",
+        dim: 512,
+        source: "VIBE",
+    },
+    Dataset {
+        name: "llama-128-ip",
+        dim: 128,
         source: "VIBE",
     },
 ];

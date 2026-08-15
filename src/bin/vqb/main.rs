@@ -174,10 +174,10 @@ fn main() -> Result<()> {
 fn data(action: DataCmd) -> Result<()> {
     match action {
         DataCmd::List => {
-            println!("{:<32} {:>5}  {:<6} LOCAL", "NAME", "DIM", "SOURCE");
+            println!("{:<34} {:>5}  {:<6} LOCAL", "NAME", "DIM", "SOURCE");
             for d in registry::DATASETS {
                 let local = if d.is_local() { "yes" } else { "no" };
-                println!("{:<32} {:>5}  {:<6} {}", d.name, d.dim, d.source, local);
+                println!("{:<34} {:>5}  {:<6} {}", d.name, d.dim, d.source, local);
             }
             Ok(())
         }

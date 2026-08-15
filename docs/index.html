@@ -210,9 +210,12 @@
         <tr><td>Yahoo</td><td class="num">677,305</td><td class="num">384</td><td class="num">0</td></tr>
         <tr><td>COCO</td><td class="num">282,360</td><td class="num">768</td><td class="num">114,054</td></tr>
         <tr><td>LAION</td><td class="num">1,000,448</td><td class="num">512</td><td class="num">999,448</td></tr>
+        <tr><td>Landmark</td><td class="num">760,757</td><td class="num">768</td><td class="num">0</td></tr>
+        <tr><td>ImageNet</td><td class="num">1,281,167</td><td class="num">512</td><td class="num">0</td></tr>
+        <tr><td>Llama</td><td class="num">256,921</td><td class="num">128</td><td class="num">255,921</td></tr>
       </tbody>
     </table>
-    <p class="note">All datasets are from <a href="https://vector-index-bench.github.io" target="_blank" rel="noopener">VIBE</a> (Jääsääri et al. 2025) and use inner-product similarity. <b>Calibration queries</b> is the number of available sample queries for training.</p>
+    <p class="note">All datasets are from <a href="https://vector-index-bench.github.io" target="_blank" rel="noopener">VIBE</a> (Jääsääri et al. 2025) and use inner-product similarity. All datasets use normalized (unit-length) vectors except for Llama. <b>Calibration queries</b> is the number of available sample queries for training.</p>
   </details>
   <details>
     <summary>Metrics</summary>
@@ -913,10 +916,14 @@ let CURRENT_RUN = null;
 // dataset id (first hyphen token) prettified; dim falls back to the digits in
 // the dataset name. Returns {html, text} — html has the name bold and the
 // counts muted; text is a tag-free version for document.title.
-const DS_NAMES = {arxiv:"ArXiv", ccnews:"CCNews", yahoo:"Yahoo", coco:"COCO", laion:"LAION"};
+const DS_NAMES = {arxiv:"ArXiv", ccnews:"CCNews", yahoo:"Yahoo", coco:"COCO", laion:"LAION",
+                  landmark:"Landmark", imagenet:"ImageNet", llama:"Llama"};
+function dsName(dataset){
+  const id = String(dataset || "").split("-")[0];
+  return DS_NAMES[id] || (id ? id[0].toUpperCase()+id.slice(1) : dataset);
+}
 function datasetHeader(block){
-  const id = String(block.dataset || "").split("-")[0];
-  const name = DS_NAMES[id] || (id ? id[0].toUpperCase()+id.slice(1) : block.dataset);
+  const name = dsName(block.dataset);
   const dim = block.dim ?? (String(block.dataset||"").match(/-(\d+)-/)||[])[1];
   const nvec = block.n_base ?? block.db_size;
   const meta = [];
@@ -946,7 +953,7 @@ function loadRun(run){
   (run.datasets || []).forEach((d,i)=>{
     const o=document.createElement("option"); o.value=i;
     const nvec = d.n_base ?? d.db_size;
-    const parts = [d.dataset];
+    const parts = [dsName(d.dataset)];
     if(nvec != null) parts.push(`${Number(nvec).toLocaleString()} vectors`);
     if(d.dim != null) parts.push(`${d.dim}d`);
     o.textContent = parts.join(" · "); dssel.appendChild(o);
