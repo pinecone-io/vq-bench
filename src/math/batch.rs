@@ -19,6 +19,12 @@ pub fn row_minmax(x: ArrayView2<f32>) -> (Array1<f32>, Array1<f32>) {
     (mins, maxs)
 }
 
+/// Second moment of the rows of an `(n × d)` batch: `X^T X / n`. Symmetric and positive
+/// semi-definite, `(d × d)`. Centered input makes this the covariance.
+pub fn second_moment(x: ArrayView2<f32>) -> Array2<f32> {
+    super::linalg::matmul(x.t(), x.view()) / x.nrows() as f32
+}
+
 /// Elementwise reciprocal, guarding zero: `0.0` stays `0.0` (never `inf`/`NaN`).
 pub fn reciprocal(v: ArrayView1<f32>) -> Array1<f32> {
     v.mapv(|x| if x != 0.0 { 1.0 / x } else { 0.0 })
@@ -84,6 +90,13 @@ mod tests {
         let (mins, maxs) = row_minmax(x.view());
         assert_eq!(mins, array![1., -2.]);
         assert_eq!(maxs, array![5., 0.]);
+    }
+
+    /// Hand-checked 2-column case: the means are left in, so the rows enter as given.
+    #[test]
+    fn second_moment_keeps_the_mean() {
+        let x = array![[1., 1.], [3., 5.]];
+        assert_eq!(second_moment(x.view()), array![[5., 8.], [8., 13.]]);
     }
 
     #[test]

@@ -17,7 +17,9 @@ pub struct SegmentSplit {
 impl SegmentSplit {
     /// Segments of `section_dim` columns over a `dim`-dimensional input.
     pub fn new(dim: usize, section_dim: usize) -> Self {
-        debug_assert!(section_dim > 0 && dim > 0);
+        // Always checked, not `debug_assert`: benchmarks run in release, where a zero
+        // width would spin the loop below forever instead of failing.
+        assert!(section_dim > 0 && dim > 0);
         let mut widths = Vec::new();
         let mut rem = dim;
         while rem > 0 {
@@ -28,8 +30,13 @@ impl SegmentSplit {
         Self { widths }
     }
 
+    /// Column count of each segment.
+    pub(crate) fn widths(&self) -> &[usize] {
+        &self.widths
+    }
+
     /// `(start, end)` column bounds of each segment.
-    fn bounds(&self) -> Vec<(usize, usize)> {
+    pub(crate) fn bounds(&self) -> Vec<(usize, usize)> {
         let mut start = 0;
         self.widths
             .iter()

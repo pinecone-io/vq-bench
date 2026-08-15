@@ -31,4 +31,5 @@ quantizers! {
     itq_asym => ItqAsym,
     pq => Pq,
     opq => Opq,
+    opq_p => OpqP,
 }

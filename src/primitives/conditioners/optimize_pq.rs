@@ -7,41 +7,32 @@
 //! Apply: x --> x R
 //! Reconstruct: y --> R^T * y   (R^T = R^-1)
 //! Score: s --> s  (queries also rotated)
+//!
+//! The alternation starts from the identity and is locally optimal, so where it lands
+//! depends on what it is handed: Ge et al. 2013's best-performing variant runs it behind
+//! the parametric rotation (`pca_rotate` -> `balance_parts`).
 
 use ndarray::{s, Array2, ArrayView2, Axis};
 
-use crate::{coding, math, Primitive};
+use crate::{coding, math, Primitive, SegmentSplit};
 
-/// OPQ alternation steps (Ge et al. 2013 use ~15 for the non-parametric variant).
-const ITERS: usize = 15;
 /// Lloyd iterations per segment codebook, per alternation step.
 const KMEANS_ITERS: usize = 10;
 
 pub struct OptimizePq {
     centroids: usize,
     section_dim: usize,
+    iters: usize,
     seed: u64,
 }
 
 impl OptimizePq {
     /// A learned PQ rotation over `section_dim`-column segments with `centroids`
-    /// codewords each; `seed` drives the internal codebook init.
-    pub fn new(centroids: usize, section_dim: usize, seed: u64) -> Self {
+    /// codewords each, refined by `iters` alternation steps; `seed` drives the internal
+    /// codebook init.
+    pub fn new(centroids: usize, section_dim: usize, iters: usize, seed: u64) -> Self {
         debug_assert!(section_dim > 0 && (2..=256).contains(&centroids));
-        Self { centroids, section_dim, seed }
-    }
-
-    /// Contiguous `section_dim`-column segment bounds over `d` dims (short last segment),
-    /// matching `SegmentSplit`.
-    fn segments(&self, d: usize) -> Vec<(usize, usize)> {
-        let mut bounds = Vec::new();
-        let mut start = 0;
-        while start < d {
-            let end = (start + self.section_dim).min(d);
-            bounds.push((start, end));
-            start = end;
-        }
-        bounds
+        Self { centroids, section_dim, iters, seed }
     }
 
     /// Read the `d x d` rotation back out of the model bytes.
@@ -62,9 +53,9 @@ impl Primitive for OptimizePq {
 
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         let d = vectors.ncols();
-        let segments = self.segments(d);
+        let segments = SegmentSplit::new(d, self.section_dim).bounds();
         let mut rotation = Array2::<f32>::eye(d);
-        for _ in 0..ITERS {
+        for _ in 0..self.iters {
             let rotated = math::matmul(vectors, rotation.view());
             // PQ reconstruction of the rotated data, segment by segment.
             let mut recon = Array2::<f32>::zeros(rotated.raw_dim());
@@ -130,8 +121,16 @@ impl Primitive for OptimizePq {
 mod tests {
     use super::*;
     use crate::util::testing::{assert_close, refs};
-    use crate::{AsQuantizer, Kmeans, Pipeline, Quantizer, SegmentSplit, Split};
+    use crate::{AsQuantizer, Kmeans, Pipeline, Quantizer, Split};
     use ndarray::Array2;
+
+    /// Alternation steps the `opq` family defaults to.
+    const DEFAULT_ITERS: usize = 15;
+
+    /// The default non-parametric stage: 16 centroids, `DEFAULT_ITERS` steps.
+    fn optimize(section_dim: usize, seed: u64) -> OptimizePq {
+        OptimizePq::new(16, section_dim, DEFAULT_ITERS, seed)
+    }
 
     /// Low-rank (strongly correlated) data, where a decorrelating rotation helps PQ.
     fn correlated(n: usize, d: usize, seed: u64) -> Array2<f32> {
@@ -161,9 +160,9 @@ mod tests {
     #[test]
     fn deterministic_in_seed() {
         let v = correlated(80, 16, 0);
-        let a = OptimizePq::new(16, 4, 7).fit(v.view(), None);
-        let b = OptimizePq::new(16, 4, 7).fit(v.view(), None);
-        let c = OptimizePq::new(16, 4, 8).fit(v.view(), None);
+        let a = optimize(4, 7).fit(v.view(), None);
+        let b = optimize(4, 7).fit(v.view(), None);
+        let c = optimize(4, 8).fit(v.view(), None);
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -172,7 +171,7 @@ mod tests {
     fn orthogonal_round_trip_and_dot() {
         let v = correlated(30, 16, 1);
         let q = math::gaussian(&mut math::seed(2), (3, 16));
-        let op = OptimizePq::new(16, 4, 7);
+        let op = optimize(4, 7);
         let model = op.fit(v.view(), None);
         let mut x = v.clone();
         op.apply(&model, &mut x, &[]);
@@ -186,10 +185,30 @@ mod tests {
     fn reduces_pq_error_vs_random() {
         // The learned rotation lowers PQ reconstruction error below a random one.
         let v = correlated(200, 16, 1);
-        let model = OptimizePq::new(16, 4, 5).fit(v.view(), None);
+        let model = optimize(4, 5).fit(v.view(), None);
         let learned = OptimizePq::rotation(&model);
         let random = math::random_orthogonal(&mut math::seed(123), 16);
         assert!(pq_error(&v, &learned, 16, 4) <= pq_error(&v, &random, 16, 4));
+    }
+
+    /// With no alternation steps there is nothing to learn: the rotation is the identity
+    /// the fit starts from, so an upstream stage's rotation is what survives.
+    #[test]
+    fn zero_iters_is_the_identity() {
+        let v = correlated(200, 16, 4);
+        let model = OptimizePq::new(16, 4, 0, 5).fit(v.view(), None);
+        assert_eq!(OptimizePq::rotation(&model), Array2::<f32>::eye(16));
+    }
+
+    /// More alternation steps do not raise PQ error on the data they were fitted to.
+    #[test]
+    fn more_iters_do_not_hurt() {
+        let v = correlated(200, 16, 6);
+        let error = |iters| {
+            let model = OptimizePq::new(16, 4, iters, 5).fit(v.view(), None);
+            pq_error(&v, &OptimizePq::rotation(&model), 16, 4)
+        };
+        assert!(error(DEFAULT_ITERS) <= error(1), "15 steps worse than 1");
     }
 
     #[test]
@@ -208,7 +227,7 @@ mod tests {
         let codec = AsQuantizer(
             Pipeline::new(
                 16,
-                vec![Box::new(OptimizePq::new(16, 4, 1)) as Box<dyn Primitive>, Box::new(split)],
+                vec![Box::new(optimize(4, 1)) as Box<dyn Primitive>, Box::new(split)],
             )
             .unwrap(),
         );

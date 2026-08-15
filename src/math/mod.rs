@@ -11,9 +11,10 @@ mod transforms;
 
 pub use batch::{
     affine_cols, affine_rows, offset_rows, outer, reciprocal, row_minmax, scale_cols, scale_rows,
+    second_moment,
 };
 pub use cluster::{lloyd_kmeans, nearest_centroid};
-pub use linalg::{matmul, orthogonal_procrustes};
+pub use linalg::{matmul, orthogonal_procrustes, symmetric_eigen};
 pub use rng::{rademacher, random_orthogonal, seed};
 pub use transforms::{hadamard, kac_walk};
 

@@ -7,6 +7,8 @@ primitives! { Primitive:
     scale => Scale,
     random_rotate => RandomRotate,
     random_hadamard => RandomHadamard,
+    pca_rotate => PcaRotate,
+    balance_parts => BalanceParts,
     resize => Resize,
     optimize_signs => OptimizeSigns,
     optimize_pq => OptimizePq,
