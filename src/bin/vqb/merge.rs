@@ -14,7 +14,7 @@ const GATE_DATASET: &[&str] = &["dim", "n_base", "n_eval", "n_candidates"];
 /// Merge `inputs` (≥2) into one results file. Errors unless every file's run
 /// metadata matches; combines datasets, and within a shared dataset merges
 /// methods with the last file winning on a duplicate label.
-pub fn merge(inputs: &[PathBuf], out: Option<&Path>) -> Result<()> {
+pub fn merge(inputs: &[PathBuf], out: Option<&Path>, results_dir: &Path) -> Result<()> {
     if inputs.len() < 2 {
         bail!("merge needs at least two results files");
     }
@@ -58,7 +58,7 @@ pub fn merge(inputs: &[PathBuf], out: Option<&Path>) -> Result<()> {
     }
 
     // Name from the output stem; timestamp = the newest input's.
-    let out_path = out.map_or_else(|| PathBuf::from("results/merged.json"), PathBuf::from);
+    let out_path = out.map_or_else(|| results_dir.join("merged.json"), PathBuf::from);
     let name = out_path
         .file_stem()
         .and_then(|s| s.to_str())

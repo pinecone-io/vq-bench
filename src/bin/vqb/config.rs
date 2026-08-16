@@ -179,10 +179,10 @@ impl RunConfig {
         out
     }
 
-    /// Check datasets (names and local files), method names and params, and
-    /// metrics against what the harness knows. Returns one message per problem;
+    /// Check datasets (names and local files under `data`), method names and params,
+    /// and metrics against what the harness knows. Returns one message per problem;
     /// empty means the config is runnable.
-    pub fn validate(&self) -> Vec<String> {
+    pub fn validate(&self, data: &Path) -> Vec<String> {
         let mut problems = Vec::new();
         if self.datasets.is_empty() {
             problems.push("no datasets listed".to_string());
@@ -192,10 +192,10 @@ impl RunConfig {
         }
         for ds in &self.datasets {
             match registry::resolve(ds) {
-                Ok(d) if !d.is_local() => problems.push(format!(
+                Ok(d) if !d.is_local(data) => problems.push(format!(
                     "dataset `{}` not found at {} (run `vqb data get {}`)",
                     d.name,
-                    d.local_path().display(),
+                    d.local_path(data).display(),
                     d.name
                 )),
                 Ok(_) => {}
@@ -274,8 +274,8 @@ fn cartesian(params: &BTreeMap<String, Value>) -> Vec<BTreeMap<String, Value>> {
 }
 
 /// Ensure a config has no validation problems, returning a combined error.
-pub fn require_valid(cfg: &RunConfig) -> Result<()> {
-    let problems = cfg.validate();
+pub fn require_valid(cfg: &RunConfig, data: &Path) -> Result<()> {
+    let problems = cfg.validate(data);
     if !problems.is_empty() {
         bail!("invalid config:\n  - {}", problems.join("\n  - "));
     }
@@ -398,7 +398,7 @@ mod tests {
             n_fit: None,
             threads: None,
         };
-        let problems = cfg.validate();
+        let problems = cfg.validate(Path::new("data"));
         assert_eq!(problems.len(), 3); // unknown dataset, quantizer, metric
     }
 
@@ -421,7 +421,7 @@ mod tests {
             n_fit: None,
             threads: None,
         };
-        let problems = cfg.validate();
+        let problems = cfg.validate(Path::new("data"));
         let param_problems: Vec<&String> = problems
             .iter()
             .filter(|p| p.contains("unknown param"))
@@ -449,7 +449,7 @@ mod tests {
             n_fit: None,
             threads: None,
         };
-        let problems = cfg.validate();
+        let problems = cfg.validate(Path::new("data"));
         let param_problems: Vec<&String> =
             problems.iter().filter(|p| p.contains("param `b`")).collect();
         assert_eq!(param_problems.len(), 1);

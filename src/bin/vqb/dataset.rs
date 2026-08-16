@@ -340,20 +340,19 @@ fn write_neighbors(file: &hdf5::File, name: &str, nbrs: &[Vec<usize>]) -> Result
 
 // --- data get --------------------------------------------------------------
 
-/// Download `entry` from VIBE and reformat into the harness layout at its local path.
+/// Download `entry` from VIBE and reformat into the harness layout at `dest`.
 /// `candidates` sets the `eval_candidates` width L: `None` keeps VIBE's shipped
 /// neighbors, `Some(l)` recomputes the exact top-L by brute force. When the file is
 /// already local, only the candidates are rebuilt (in place) if L differs.
-pub fn get(entry: &Entry, candidates: Option<usize>, mode: Mode) -> Result<()> {
-    let dest = entry.local_path();
+pub fn get(entry: &Entry, dest: &Path, candidates: Option<usize>, mode: Mode) -> Result<()> {
     if dest.exists() {
         if let Some(l) = candidates {
             // `top_neighbors` clamps the stored width to the base size, so compare against the
             // clamped target — otherwise `--candidates L` with L > n_base never converges.
-            let target = l.min(stored_base_rows(&dest)?);
-            if current_candidate_width(&dest)? != target {
+            let target = l.min(stored_base_rows(dest)?);
+            if current_candidate_width(dest)? != target {
                 println!("recomputing {l} candidate(s) for {} ...", dest.display());
-                rewrite_candidates(&dest, l, mode)?;
+                rewrite_candidates(dest, l, mode)?;
             }
         }
         println!("have {}", dest.display());
@@ -365,7 +364,7 @@ pub fn get(entry: &Entry, candidates: Option<usize>, mode: Mode) -> Result<()> {
     let src = dest.with_extension("src.hdf5");
     download(&entry.url(), &src)?;
     println!("formatting {} ...", dest.display());
-    let res = reformat(&src, &dest, candidates, mode);
+    let res = reformat(&src, dest, candidates, mode);
     // `reformat` writes `dest` atomically (see `write_dataset`), so a failure never
     // leaves a partial file there. Drop `src` once we're done, but keep it around on
     // failure for diagnosis.

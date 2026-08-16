@@ -50,12 +50,10 @@ const PATCH_OFFSET: u64 = 48;
 /// Length of that block.
 const PATCH_LEN: usize = 40;
 
-/// `results/codes/<dataset>/<method>.codes`. Keyed only by what determines the
-/// codes (dataset + method); the rest of the identity is verified via the header.
-pub fn path_for(dataset: &str, label: &str) -> PathBuf {
-    Path::new("results/codes")
-        .join(dataset)
-        .join(format!("{}.codes", slug(label)))
+/// `<dir>/<dataset>/<method>.codes`. Keyed only by what determines the codes
+/// (dataset + method); the rest of the identity is verified via the header.
+pub fn path_for(dir: &Path, dataset: &str, label: &str) -> PathBuf {
+    dir.join(dataset).join(format!("{}.codes", slug(label)))
 }
 
 /// Map a method label like `MinMax (b=2)` to a filesystem-safe stem.
@@ -85,10 +83,10 @@ pub struct Identity {
 }
 
 impl Identity {
-    /// The stored codes for `dataset` × `label` matching this identity, if any. A
-    /// missing, corrupt, or truncated file is a clean miss (`open` validates).
-    pub fn stored(&self, dataset: &str, label: &str) -> Option<CodeStore> {
-        CodeStore::open(&path_for(dataset, label))
+    /// The stored codes for `dataset` × `label` under `dir` matching this identity, if
+    /// any. A missing, corrupt, or truncated file is a clean miss (`open` validates).
+    pub fn stored(&self, dir: &Path, dataset: &str, label: &str) -> Option<CodeStore> {
+        CodeStore::open(&path_for(dir, dataset, label))
             .ok()
             .filter(|s| s.matches(self, label))
     }
@@ -551,7 +549,10 @@ mod tests {
     /// full identity match and treat anything else — absent file, wrong seed — as a miss.
     #[test]
     fn stored_hits_only_on_a_full_identity_match() {
-        let ds = "__vqb_test_stored";
+        // Its own directory, so the test never writes into a real code store.
+        let dir = std::env::temp_dir().join("vqb_codes_test_stored");
+        let _ = std::fs::remove_dir_all(&dir); // clear any leftover from a prior crash
+        let ds = "stub";
         let label = "MinMax (b=2)";
         let id = Identity {
             seed: 5,
@@ -560,20 +561,20 @@ mod tests {
             n_fit: 3,
             n_calib: 0,
         };
-        assert!(id.stored(ds, label).is_none(), "no file yet");
+        assert!(id.stored(&dir, ds, label).is_none(), "no file yet");
 
-        let path = path_for(ds, label);
+        let path = path_for(&dir, ds, label);
         let mut w = CodeWriter::create(&path, &id, 1, 0.0, 0, label, &[]).unwrap();
         w.push_chunk(&[vec![1, 2], vec![3, 4], vec![5, 6]]).unwrap();
         w.finish(0.0, 0).unwrap();
 
-        assert!(id.stored(ds, label).is_some());
-        assert!(id.stored(ds, "MinMax (b=4)").is_none(), "label");
+        assert!(id.stored(&dir, ds, label).is_some());
+        assert!(id.stored(&dir, ds, "MinMax (b=4)").is_none(), "label");
         assert!(
-            Identity { seed: 6, ..id }.stored(ds, label).is_none(),
+            Identity { seed: 6, ..id }.stored(&dir, ds, label).is_none(),
             "seed"
         );
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Ragged codes round-trip: every row is addressable and the reported size is the

@@ -11,12 +11,9 @@ use anyhow::{bail, Context, Result};
 const TEMPLATE: &str = include_str!("../../../docs/index.html");
 const SLOT: &str = "__EMBED__";
 
-/// Where generated dashboards land by default (a gitignored working dir).
-const HTML_DIR: &str = "results/html";
-
 /// Render `results` to a standalone HTML and, unless `no_open`, open it in the
-/// default browser. Output defaults to `results/html/<stem>.html`.
-pub fn write(results: &Path, out: Option<&Path>, no_open: bool) -> Result<()> {
+/// default browser. Output defaults to `<html_dir>/<stem>.html`.
+pub fn write(results: &Path, out: Option<&Path>, no_open: bool, html_dir: &Path) -> Result<()> {
     if !results.is_file() {
         bail!("no such results file: {}", results.display());
     }
@@ -33,11 +30,18 @@ pub fn write(results: &Path, out: Option<&Path>, no_open: bool) -> Result<()> {
     let out_path = match out {
         Some(p) => p.to_path_buf(),
         None => {
-            std::fs::create_dir_all(HTML_DIR).context("create results/html")?;
             let stem = results.file_stem().and_then(|s| s.to_str()).unwrap_or("run");
-            Path::new(HTML_DIR).join(format!("{stem}.html"))
+            html_dir.join(format!("{stem}.html"))
         }
     };
+    // Both branches: an explicit `--out` into a directory that doesn't exist yet is
+    // just as reasonable a thing to ask for as the default one.
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+    }
     std::fs::write(&out_path, html).with_context(|| format!("writing {}", out_path.display()))?;
     println!("wrote {}", out_path.display());
 

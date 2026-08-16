@@ -74,7 +74,7 @@ vqb run configs/minmax-compare.json              # run the config
 ```
 
 Each run measures size (bits per dimension) and the given quality metrics, as well as additional resource metrics (fit and encode time and peak memory, per-query latency, etc.). Results are written to `results/`, including a `.raw` capture of the reconstructions and scoring
-values, and an aggregated `.json`.
+values, and an aggregated `.json`. See [Output locations](#output-locations) to put them elsewhere.
 
 The remaining commands split `run` into reusable stages: `encode` does the
 expensive fit + encode once, and `eval` recomputes the metrics from an existing `.raw`.
@@ -86,6 +86,36 @@ vqb eval   <config> <raw>      # recompute metrics directly from a prior run's .
 vqb merge  <a> <b>             # combine JSON results files
 ```
 
+## Output locations
+
+Every output directory defaults to a path under the current directory. Name them
+explicitly — once in your environment is enough — and where you run from stops
+mattering:
+
+| Flag | Environment | Default | Holds |
+|---|---|---|---|
+| `--data-dir` | `VQB_DATA_DIR` | `./data` | downloaded datasets |
+| `--results-dir` | `VQB_RESULTS_DIR` | `./results` | results JSON, plus `raw/` and `html/` |
+| `--codes-dir` | `VQB_CODES_DIR` | `<results-dir>/codes` | per-method code stores |
+| `--publish-dir` | `VQB_PUBLISH_DIR` | `./docs/results` | what `publish` copies in and the site serves |
+
+The flag wins over the variable, which wins over the default. All four are global, so
+they attach to any subcommand in either position. `vqb show paths` prints what they
+resolved to, and `vqb run <config> --dry-run` reports the same block.
+
+Code stores are by far the largest artifact — roughly 8 GB per billion base-vector
+floats, so a 9-Gfloat dataset wants about 70 GB — and often belong on a different volume
+from the small results JSONs:
+
+```bash
+vqb --codes-dir /mnt/big/vqb-codes encode <config> --stream
+vqb --codes-dir /mnt/big/vqb-codes run    <config>            # reuses them
+```
+
+`encode` and `run` have to agree on the directory or the reuse check simply misses and
+re-encodes. Exporting `VQB_CODES_DIR` once is the easy way to keep them in step. Note a
+store placed outside the repository is no longer covered by `.gitignore`.
+
 ## Streaming a dataset larger than memory
 
 By default every command loads the base vectors whole, so a dataset has to fit in RAM. `--stream` reads them from disk a block at a time instead, and peak memory then tracks `--block-mb` (default 256) rather than the dataset size:
@@ -96,7 +126,7 @@ vqb encode <config> --stream          # fit + encode a base larger than RAM
 vqb run    <config> --stream          # ... and score it too
 ```
 
-A streamed `run` writes each method's codes to `results/codes/` and scores them from there, so the code set stays off the heap as well. The codes are the same either way, and a store written by one mode is reusable by the other. (Bit-for-bit, with one caveat: a quantizer whose `encode` runs a batched matmul — `e_rabitq` does — can differ in a handful of codes, because the matmul's accumulation order depends on the batch shape and `--block-mb` sets that shape. It is a rounding difference, not a different encoding.) Lowering `--block-mb` cuts peak memory further at no cost in speed.
+A streamed `run` writes each method's codes to the code store (`results/codes/` by default) and scores them from there, so the code set stays off the heap as well. The codes are the same either way, and a store written by one mode is reusable by the other. (Bit-for-bit, with one caveat: a quantizer whose `encode` runs a batched matmul — `e_rabitq` does — can differ in a handful of codes, because the matmul's accumulation order depends on the batch shape and `--block-mb` sets that shape. It is a rounding difference, not a different encoding.) Lowering `--block-mb` cuts peak memory further at no cost in speed.
 
 `--stream` requires `n_fit` and `n_reconstruct` in the config, since both otherwise default to every base row — exactly what a streamed run must not hold. `vqb run <config> --dry-run --stream` reports this before reading anything.
 

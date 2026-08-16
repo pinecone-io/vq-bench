@@ -1,11 +1,8 @@
 //! The dataset registry: known datasets, their metadata, and local paths.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-
-/// Directory holding downloaded dataset files (override with `VQB_DATA_DIR`).
-const DEFAULT_DATA_DIR: &str = "data";
 
 /// Base URL for VIBE dataset files (https://vector-index-bench.github.io).
 const VIBE_BASE: &str = "https://huggingface.co/datasets/vector-index-bench/vibe/resolve/main";
@@ -29,15 +26,14 @@ impl Dataset {
         format!("{VIBE_BASE}/{}.hdf5", self.name)
     }
 
-    /// Local path to the dataset file, under `$VQB_DATA_DIR` (default `data/`).
-    pub fn local_path(&self) -> PathBuf {
-        let dir = std::env::var("VQB_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
-        PathBuf::from(dir).join(self.file())
+    /// Local path to the dataset file, under the resolved data directory.
+    pub fn local_path(&self, data: &Path) -> PathBuf {
+        data.join(self.file())
     }
 
     /// Whether the file is present locally.
-    pub fn is_local(&self) -> bool {
-        self.local_path().exists()
+    pub fn is_local(&self, data: &Path) -> bool {
+        self.local_path(data).exists()
     }
 }
 

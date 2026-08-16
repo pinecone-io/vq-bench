@@ -62,8 +62,12 @@ accepts anywhere in `>=0.15, <=0.17` and so need not be the 0.16 this crate shar
 linfa. **Nothing outside `h5.rs` may cross that boundary**: every other HDF5 call in the
 tree is `read_raw`/`write_raw` over `Vec`s, and must stay that way.
 
-Artifacts land under `results/`: `<exp>.json` (aggregated), `raw/<exp>.raw` (the capture
-`vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`)
+Artifacts land under the resolved results directory (`./results` by default,
+`--results-dir`): `<exp>.json` (aggregated), `raw/<exp>.raw` (the capture `vqb eval`
+replays), and `codes/` (per-method code stores) unless `--codes-dir` moves the store
+elsewhere. `paths.rs` resolves every output directory and is the only module that reads
+a path environment variable; every other module takes the `&Path` it needs, so nothing
+else resolves a default on its own. A code store (`codes.rs`)
 addresses rows by stride while every code comes out the same width and appends a lengths
 table once one doesn't, so a quantizer may spend a different number of bytes per vector.
 Its header records everything determining the codes — dataset,

@@ -7,6 +7,7 @@
 mod config;
 mod mem;
 mod merge;
+mod paths;
 mod registry;
 mod view;
 
@@ -44,6 +45,7 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use config::RunConfig;
+use paths::Paths;
 
 /// Default `--block-mb`: MiB of f32 rows held per block when streaming from disk.
 const DEFAULT_BLOCK_MB: usize = 256;
@@ -55,6 +57,8 @@ const DEFAULT_BLOCK_MB: usize = 256;
     version
 )]
 struct Cli {
+    #[command(flatten)]
+    dirs: paths::Dirs,
     #[command(subcommand)]
     command: Command,
 }
@@ -174,43 +178,48 @@ enum ShowCmd {
     /// List the metric names a config may request.
     #[command(visible_alias = "m")]
     Metrics,
+    /// Print the resolved directories the harness reads and writes.
+    Paths,
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
-        Command::Data { action } => data(action),
+    let cli = Cli::parse();
+    // One resolution for the whole process, before anything reads or writes.
+    let paths = Paths::resolve(cli.dirs)?;
+    match cli.command {
+        Command::Data { action } => data(action, &paths),
         Command::Run {
             config,
             dry_run,
             fresh,
             stream,
             block_mb,
-        } => run(&config, dry_run, fresh, stream, block_mb),
+        } => run(&config, dry_run, fresh, stream, block_mb, &paths),
         Command::Encode {
             config,
             fresh,
             stream,
             block_mb,
-        } => encode(&config, fresh, stream, block_mb),
-        Command::Eval { config, raw_dir } => eval(&config, &raw_dir),
-        Command::Merge { inputs, out } => merge::merge(&inputs, out.as_deref()),
+        } => encode(&config, fresh, stream, block_mb, &paths),
+        Command::Eval { config, raw_dir } => eval(&config, &raw_dir, &paths),
+        Command::Merge { inputs, out } => merge::merge(&inputs, out.as_deref(), paths.results()),
         Command::View {
             results,
             out,
             no_open,
-        } => view::write(&results, out.as_deref(), no_open),
-        Command::Show { what } => show(what),
-        Command::Publish { results, no_index } => publish(&results, no_index),
-        Command::Index => index(),
+        } => view::write(&results, out.as_deref(), no_open, &paths.html()),
+        Command::Show { what } => show(what, &paths),
+        Command::Publish { results, no_index } => publish(&results, no_index, &paths),
+        Command::Index => index(paths.publish()),
     }
 }
 
-fn data(action: DataCmd) -> Result<()> {
+fn data(action: DataCmd, paths: &Paths) -> Result<()> {
     match action {
         DataCmd::List => {
             println!("{:<34} {:>5}  {:<6} LOCAL", "NAME", "DIM", "SOURCE");
             for d in registry::DATASETS {
-                let local = if d.is_local() { "yes" } else { "no" };
+                let local = if d.is_local(paths.data()) { "yes" } else { "no" };
                 println!("{:<34} {:>5}  {:<6} {}", d.name, d.dim, d.source, local);
             }
             Ok(())
@@ -221,13 +230,17 @@ fn data(action: DataCmd) -> Result<()> {
             println!("dim:    {}", d.dim);
             println!("source: {}", d.source);
             println!("url:    {}", d.url());
-            println!("file:   {}", d.local_path().display());
+            println!("file:   {}", d.local_path(paths.data()).display());
             println!(
                 "local:  {}",
-                if d.is_local() { "present" } else { "missing" }
+                if d.is_local(paths.data()) {
+                    "present"
+                } else {
+                    "missing"
+                }
             );
-            if d.is_local() {
-                print_arrays(d)?;
+            if d.is_local(paths.data()) {
+                print_arrays(d, paths)?;
             } else {
                 println!("arrays: base, calib, eval, eval_candidates (download to see shapes)");
             }
@@ -238,29 +251,43 @@ fn data(action: DataCmd) -> Result<()> {
             candidates,
             stream,
             block_mb,
-        } => data_get(&dataset, candidates, stream, block_mb),
+        } => data_get(&dataset, candidates, stream, block_mb, paths),
     }
 }
 
 #[cfg(feature = "hdf5")]
-fn data_get(name: &str, candidates: Option<usize>, stream: bool, block_mb: usize) -> Result<()> {
+fn data_get(
+    name: &str,
+    candidates: Option<usize>,
+    stream: bool,
+    block_mb: usize,
+    paths: &Paths,
+) -> Result<()> {
+    let entry = registry::resolve(name)?;
     dataset::get(
-        registry::resolve(name)?,
+        entry,
+        &entry.local_path(paths.data()),
         candidates,
         read_mode(stream, block_mb),
     )
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn data_get(_name: &str, _candidates: Option<usize>, _stream: bool, _mb: usize) -> Result<()> {
+fn data_get(
+    _name: &str,
+    _candidates: Option<usize>,
+    _stream: bool,
+    _mb: usize,
+    _paths: &Paths,
+) -> Result<()> {
     bail!("`vqb data get` needs the hdf5 feature; rebuild with default features")
 }
 
 /// Print each stored array's `{rows, cols}` shape (needs the file open, so hdf5-only).
 #[cfg(feature = "hdf5")]
-fn print_arrays(d: &registry::Dataset) -> Result<()> {
+fn print_arrays(d: &registry::Dataset, paths: &Paths) -> Result<()> {
     println!("arrays:");
-    for (name, shape) in dataset::array_shapes(&d.local_path())? {
+    for (name, shape) in dataset::array_shapes(&d.local_path(paths.data()))? {
         match shape {
             Some((rows, cols)) => println!("  {name:<16} {rows} × {cols}"),
             None => println!("  {name:<16} absent"),
@@ -270,22 +297,31 @@ fn print_arrays(d: &registry::Dataset) -> Result<()> {
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn print_arrays(_d: &registry::Dataset) -> Result<()> {
+fn print_arrays(_d: &registry::Dataset, _paths: &Paths) -> Result<()> {
     println!("arrays: base, calib, eval, eval_candidates");
     Ok(())
 }
 
-fn run(path: &Path, dry_run: bool, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
+fn run(
+    path: &Path,
+    dry_run: bool,
+    fresh: bool,
+    stream: bool,
+    block_mb: usize,
+    paths: &Paths,
+) -> Result<()> {
     let cfg = RunConfig::parse(path)?;
     // Before the dry-run split, so `--dry-run --stream` reports it too.
     config::require_streamable(&cfg, stream, true)?;
-    let problems = cfg.validate();
+    let problems = cfg.validate(paths.data());
     let runs = cfg.expand();
 
     if dry_run {
         let count = |n: Option<usize>| n.map_or_else(|| "all".to_string(), |n| n.to_string());
         println!("config: {}", path.display());
         println!("seed: {}", cfg.seed);
+        println!("\npaths:");
+        print_paths(paths);
         println!(
             "n_base: {}  n_fit: {}  n_reconstruct: {}  n_eval: {}  n_calib: {}",
             count(cfg.n_base),
@@ -326,36 +362,54 @@ fn run(path: &Path, dry_run: bool, fresh: bool, stream: bool, block_mb: usize) -
             bail!("validation failed:\n  - {}", problems.join("\n  - "));
         }
     } else {
-        config::require_valid(&cfg)?;
-        real_run(path, fresh, stream, block_mb)
+        config::require_valid(&cfg, paths.data())?;
+        real_run(path, fresh, stream, block_mb, paths)
     }
 }
 
 #[cfg(feature = "hdf5")]
-fn real_run(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
-    run::run(path, fresh, read_mode(stream, block_mb))
+fn real_run(path: &Path, fresh: bool, stream: bool, block_mb: usize, paths: &Paths) -> Result<()> {
+    run::run(path, fresh, read_mode(stream, block_mb), paths)
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn real_run(_path: &Path, _fresh: bool, _stream: bool, _mb: usize) -> Result<()> {
+fn real_run(
+    _path: &Path,
+    _fresh: bool,
+    _stream: bool,
+    _mb: usize,
+    _paths: &Paths,
+) -> Result<()> {
     bail!("`vqb run` needs the hdf5 feature; rebuild with default features")
 }
 
-fn encode(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
+fn encode(path: &Path, fresh: bool, stream: bool, block_mb: usize, paths: &Paths) -> Result<()> {
     let cfg = RunConfig::parse(path)?;
-    config::require_valid(&cfg)?;
+    config::require_valid(&cfg, paths.data())?;
     // `encode` builds no reconstruction references, so `n_reconstruct` is free here.
     config::require_streamable(&cfg, stream, false)?;
-    real_encode(path, fresh, stream, block_mb)
+    real_encode(path, fresh, stream, block_mb, paths)
 }
 
 #[cfg(feature = "hdf5")]
-fn real_encode(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
-    run::encode_to_disk(path, fresh, read_mode(stream, block_mb))
+fn real_encode(
+    path: &Path,
+    fresh: bool,
+    stream: bool,
+    block_mb: usize,
+    paths: &Paths,
+) -> Result<()> {
+    run::encode_to_disk(path, fresh, read_mode(stream, block_mb), paths)
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn real_encode(_path: &Path, _fresh: bool, _stream: bool, _mb: usize) -> Result<()> {
+fn real_encode(
+    _path: &Path,
+    _fresh: bool,
+    _stream: bool,
+    _mb: usize,
+    _paths: &Paths,
+) -> Result<()> {
     bail!("`vqb encode` needs the hdf5 feature; rebuild with default features")
 }
 
@@ -370,32 +424,32 @@ fn read_mode(stream: bool, block_mb: usize) -> dataset::Mode {
 }
 
 #[cfg(feature = "hdf5")]
-fn eval(config: &Path, raw_dir: &Path) -> Result<()> {
-    run::eval(config, raw_dir)
+fn eval(config: &Path, raw_dir: &Path, paths: &Paths) -> Result<()> {
+    run::eval(config, raw_dir, paths)
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn eval(_config: &Path, _raw_dir: &Path) -> Result<()> {
+fn eval(_config: &Path, _raw_dir: &Path, _paths: &Paths) -> Result<()> {
     bail!("`vqb eval` needs the hdf5 feature; rebuild with default features")
 }
 
-/// Directory of published results, served as the vq-bench.com site.
-const PUBLISH_DIR: &str = "docs/results";
-
-/// Copy a results JSON into `docs/results/`, then rebuild the manifest (unless skipped).
-fn publish(results: &Path, no_index: bool) -> Result<()> {
+/// Copy a results JSON into the published site directory, then rebuild the manifest
+/// (unless skipped). Both steps take the same directory — an `index` over a different
+/// one would describe files that aren't there.
+fn publish(results: &Path, no_index: bool, paths: &Paths) -> Result<()> {
     if !results.is_file() {
         bail!("no such results file: {}", results.display());
     }
     let name = results
         .file_name()
         .context("results path has no file name")?;
-    let dest = Path::new(PUBLISH_DIR).join(name);
-    std::fs::create_dir_all(PUBLISH_DIR).context("create docs/results")?;
+    let dir = paths.publish();
+    let dest = dir.join(name);
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     std::fs::copy(results, &dest).with_context(|| format!("copying to {}", dest.display()))?;
     println!("published {} -> {}", results.display(), dest.display());
     if !no_index {
-        index()?;
+        index(dir)?;
     }
     Ok(())
 }
@@ -438,12 +492,11 @@ struct DatasetHead {
     n_base: usize,
 }
 
-/// Rebuild `docs/results/manifest.json` by scanning the published result JSONs.
-fn index() -> Result<()> {
-    let dir = Path::new(PUBLISH_DIR);
-    std::fs::create_dir_all(dir).context("create docs/results")?;
+/// Rebuild `<publish>/manifest.json` by scanning the published result JSONs.
+fn index(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-        .with_context(|| format!("reading {PUBLISH_DIR}"))?
+        .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .collect();
     paths.sort();
@@ -494,7 +547,7 @@ fn index() -> Result<()> {
     Ok(())
 }
 
-fn show(what: ShowCmd) -> Result<()> {
+fn show(what: ShowCmd, paths: &Paths) -> Result<()> {
     match what {
         ShowCmd::Quantizers => {
             println!("Quantizers:");
@@ -521,6 +574,18 @@ fn show(what: ShowCmd) -> Result<()> {
                 println!("  {name:<26} {desc}");
             }
         }
+        ShowCmd::Paths => print_paths(paths),
     }
     Ok(())
+}
+
+/// Report every resolved directory -- the only way to see where a large encode is about
+/// to land without starting one, and what a stale export is doing to it.
+fn print_paths(paths: &Paths) {
+    println!("data:     {}", paths.data().display());
+    println!("results:  {}", paths.results().display());
+    println!("  raw:    {}", paths.raw().display());
+    println!("  html:   {}", paths.html().display());
+    println!("codes:    {}", paths.codes().display());
+    println!("publish:  {}", paths.publish().display());
 }

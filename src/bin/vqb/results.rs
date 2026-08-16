@@ -96,8 +96,14 @@ pub struct MethodResult {
     pub score_tv: Option<BTreeMap<String, f64>>,
 }
 
-/// Pretty-print the run to a JSON file.
+/// Pretty-print the run to a JSON file, creating its directory if needed.
 pub fn write_json(path: &Path, run: &Run) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+    }
     let s = serde_json::to_string_pretty(run).context("serialize results")?;
     std::fs::write(path, s).with_context(|| format!("writing {}", path.display()))?;
     Ok(())

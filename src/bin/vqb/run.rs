@@ -15,6 +15,7 @@ use vqb::Quantizer;
 
 use crate::config::{ResolvedMethod, RunConfig};
 use crate::dataset::{self, Base, Loaded};
+use crate::paths::Paths;
 use crate::results::{Run, RunMeta, Timing};
 use crate::{aggregate, bench, codes, config, factory, mem, raw, registry, results};
 use raw::{RawDataset, RawMeta, RawMethod};
@@ -247,11 +248,12 @@ fn encode_in_chunks<Q: Quantizer + ?Sized>(
 
 /// Say what a streamed run is doing, since it changes both where the codes live and what
 /// `encode_memory` counts.
-fn announce_stream(mode: dataset::Mode, threads: usize) {
+fn announce_stream(mode: dataset::Mode, threads: usize, codes: &Path) {
     if let dataset::Mode::Stream { block_mb } = mode {
         eprintln!(
             "--stream: base read from disk in ≤{block_mb} MiB blocks, codes written to \
-             results/codes/ ({threads}-chunk window; encode_memory includes the read block)"
+             {} ({threads}-chunk window; encode_memory includes the read block)",
+            codes.display()
         );
     }
 }
@@ -583,6 +585,7 @@ fn run_dataset<W: std::io::Write>(
     fresh: bool,
     mode: dataset::Mode,
     threads: usize,
+    codes_dir: &Path,
     writer: &mut raw::RawWriter<W>,
 ) -> Result<results::DatasetResult> {
     // The searched DB: the full base, or a seeded subsample when `n_base` is set.
@@ -604,7 +607,10 @@ fn run_dataset<W: std::io::Write>(
     let encoding = fresh
         || methods
             .iter()
-            .any(|m| id.stored(name, &m.label(vqb::catalog::display(&m.name))).is_none());
+            .any(|m| {
+                id.stored(codes_dir, name, &m.label(vqb::catalog::display(&m.name)))
+                    .is_none()
+            });
     // One read buffer for every method's encode pass, sized and allocated before the first
     // `encode_peak_bytes` window so the metric is never charged for it.
     let shape = encode_shape(dim, threads, mode);
@@ -698,8 +704,12 @@ fn run_dataset<W: std::io::Write>(
         // Reuse codes persisted by a prior `vqb encode` when their full identity
         // matches this config; otherwise encode in memory (keeps plain `run`
         // self-contained).
-        let cache_path = codes::path_for(name, &label);
-        let cached = if fresh { None } else { id.stored(name, &label) };
+        let cache_path = codes::path_for(codes_dir, name, &label);
+        let cached = if fresh {
+            None
+        } else {
+            id.stored(codes_dir, name, &label)
+        };
         // Thread count the cached codes were encoded with (for the reuse note).
         let reused_threads = cached.as_ref().map(codes::CodeStore::threads);
         let rm = match (cached, db.resident()) {
@@ -777,14 +787,14 @@ fn run_dataset<W: std::io::Write>(
 
 /// `vqb run <config>`: run the config, writing `results/raw/<exp>.raw` and
 /// `results/<exp>.json`.
-pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
+pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode, paths: &Paths) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
-    config::require_valid(&cfg)?;
+    config::require_valid(&cfg, paths.data())?;
     let exp = config_stem(config_path);
     let methods = cfg.expand();
     let threads = init_thread_pool(cfg.threads);
     eprintln!("encoding with {threads} thread(s)");
-    announce_stream(mode, threads);
+    announce_stream(mode, threads, paths.codes());
     if fresh {
         eprintln!("--fresh: ignoring stored codes, encoding from scratch");
     }
@@ -804,10 +814,13 @@ pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
 
     // Open the raw capture and write its header now; each dataset/method is
     // appended as it finishes rather than buffered into one giant tree.
-    std::fs::create_dir_all("results/raw").context("create results/raw")?;
-    let raw_path = format!("results/raw/{exp}.raw");
+    let raw_dir = paths.raw();
+    std::fs::create_dir_all(&raw_dir)
+        .with_context(|| format!("creating {}", raw_dir.display()))?;
+    let raw_path = raw_dir.join(format!("{exp}.raw"));
     let file = std::io::BufWriter::new(
-        std::fs::File::create(&raw_path).with_context(|| format!("creating {raw_path}"))?,
+        std::fs::File::create(&raw_path)
+            .with_context(|| format!("creating {}", raw_path.display()))?,
     );
     let mut writer = raw::RawWriter::new(file, &meta, cfg.datasets.len())?;
 
@@ -817,7 +830,7 @@ pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
         eprint!("\nloading {} … ", entry.name);
         let _ = std::io::stderr().flush();
         let t = Instant::now();
-        let loaded = dataset::load(&entry.local_path(), mode)?;
+        let loaded = dataset::load(&entry.local_path(paths.data()), mode)?;
         eprintln!("{:.1}s", t.elapsed().as_secs_f64());
         datasets.push(run_dataset(
             entry.name,
@@ -827,6 +840,7 @@ pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
             fresh,
             mode,
             threads,
+            paths.codes(),
             &mut writer,
         )?);
     }
@@ -847,17 +861,21 @@ pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
         },
         datasets,
     };
-    let json_path = format!("results/{exp}.json");
-    results::write_json(Path::new(&json_path), &run)?;
+    let json_path = paths.results().join(format!("{exp}.json"));
+    results::write_json(&json_path, &run)?;
 
-    println!("wrote {raw_path} and {json_path}");
+    println!(
+        "wrote {} and {}",
+        raw_path.display(),
+        json_path.display()
+    );
     Ok(())
 }
 
 /// `vqb eval <config> <raw>`: recompute metrics from a `.raw` capture.
-pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
+pub fn eval(config_path: &Path, raw_arg: &Path, paths: &Paths) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
-    config::require_valid(&cfg)?;
+    config::require_valid(&cfg, paths.data())?;
     let exp = config_stem(config_path);
     let raw_path = if raw_arg.is_file() {
         raw_arg.to_path_buf()
@@ -866,10 +884,9 @@ pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
     };
     let data = raw::read(&raw_path)?;
     let run = aggregate::run(&data, &cfg.metrics, &cfg.ks, &cfg.temperatures);
-    std::fs::create_dir_all("results").context("create results")?;
-    let json_path = format!("results/{exp}.json");
-    results::write_json(Path::new(&json_path), &run)?;
-    println!("wrote {json_path}");
+    let json_path = paths.results().join(format!("{exp}.json"));
+    results::write_json(&json_path, &run)?;
+    println!("wrote {}", json_path.display());
     Ok(())
 }
 
@@ -878,13 +895,18 @@ pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
 /// No scoring or reconstruction — this is the memory-bounded encode pass. Methods
 /// whose codes are already stored under a matching identity are skipped unless
 /// `fresh`.
-pub fn encode_to_disk(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
+pub fn encode_to_disk(
+    config_path: &Path,
+    fresh: bool,
+    mode: dataset::Mode,
+    paths: &Paths,
+) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
-    config::require_valid(&cfg)?;
+    config::require_valid(&cfg, paths.data())?;
     let methods = cfg.expand();
     let threads = init_thread_pool(cfg.threads);
     eprintln!("encoding with {threads} thread(s)");
-    announce_stream(mode, threads);
+    announce_stream(mode, threads, paths.codes());
     if fresh {
         eprintln!("--fresh: ignoring stored codes, encoding from scratch");
     }
@@ -893,7 +915,7 @@ pub fn encode_to_disk(config_path: &Path, fresh: bool, mode: dataset::Mode) -> R
         let entry = registry::resolve(ds)?;
         // With every method already stored, skip the multi-GB load as well — the
         // identity comes from the dataset's shapes, which cost only a header read.
-        if !fresh && fully_encoded(entry, &methods, &cfg) {
+        if !fresh && fully_encoded(entry, &methods, &cfg, paths) {
             eprintln!(
                 "\n{} — all {} method(s) cached, skipping",
                 entry.name,
@@ -904,9 +926,18 @@ pub fn encode_to_disk(config_path: &Path, fresh: bool, mode: dataset::Mode) -> R
         eprint!("\nloading {} … ", entry.name);
         let _ = std::io::stderr().flush();
         let t = Instant::now();
-        let loaded = dataset::load(&entry.local_path(), mode)?;
+        let loaded = dataset::load(&entry.local_path(paths.data()), mode)?;
         eprintln!("{:.1}s", t.elapsed().as_secs_f64());
-        encode_dataset(entry.name, &loaded, &methods, &cfg, mode, threads, fresh)?;
+        encode_dataset(
+            entry.name,
+            &loaded,
+            &methods,
+            &cfg,
+            mode,
+            threads,
+            fresh,
+            paths.codes(),
+        )?;
     }
     Ok(())
 }
@@ -914,20 +945,26 @@ pub fn encode_to_disk(config_path: &Path, fresh: bool, mode: dataset::Mode) -> R
 /// Whether every method's codes are already stored under this config's identity,
 /// judged from the dataset's shapes alone. A dataset whose shapes can't be read is
 /// never skipped — `dataset::load` reports that failure with a better message.
-fn fully_encoded(entry: &registry::Dataset, methods: &[ResolvedMethod], cfg: &RunConfig) -> bool {
-    let Ok(shapes) = dataset::identity_shapes(&entry.local_path()) else {
+fn fully_encoded(
+    entry: &registry::Dataset,
+    methods: &[ResolvedMethod],
+    cfg: &RunConfig,
+    paths: &Paths,
+) -> bool {
+    let Ok(shapes) = dataset::identity_shapes(&entry.local_path(paths.data())) else {
         return false;
     };
     let id = identity_for(shapes.base_rows, shapes.calib_rows, shapes.dim, cfg);
     methods.iter().all(|m| {
         let label = m.label(vqb::catalog::display(&m.name));
-        id.stored(entry.name, &label).is_some()
+        id.stored(paths.codes(), entry.name, &label).is_some()
     })
 }
 
 /// Fit + encode every method on one dataset, streaming codes to disk. The DB /
 /// calib / fit subsamples match `run_dataset` exactly, so the codes align
 /// row-for-row with the DB `run` will address.
+#[allow(clippy::too_many_arguments)]
 fn encode_dataset(
     name: &str,
     loaded: &Loaded,
@@ -936,6 +973,7 @@ fn encode_dataset(
     mode: dataset::Mode,
     threads: usize,
     fresh: bool,
+    codes_dir: &Path,
 ) -> Result<()> {
     let db_storage = db_subsample(loaded, cfg)?;
     let db = db_storage.as_ref().unwrap_or(&loaded.base);
@@ -956,10 +994,10 @@ fn encode_dataset(
 
     for m in methods {
         let label = m.label(vqb::catalog::display(&m.name));
-        let path = codes::path_for(name, &label);
+        let path = codes::path_for(codes_dir, name, &label);
         // Before `fit` — that's where the cost starts. Reached only on a partial
         // hit; an all-cached dataset never gets here (see `fully_encoded`).
-        if !fresh && id.stored(name, &label).is_some() {
+        if !fresh && id.stored(codes_dir, name, &label).is_some() {
             eprintln!("  {label:<22} → {} (cached — skipping)", path.display());
             continue;
         }
