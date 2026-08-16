@@ -124,7 +124,16 @@ impl Primitive for Pipeline {
             match stage.code_bytes(models[i], self.in_dims[i]) {
                 Some(n) => {
                     for (out, code) in combined.iter_mut().zip(&codes) {
-                        debug_assert_eq!(code.len(), n);
+                        // A stage that emits a width other than the one it declares
+                        // mis-slices every downstream stage in `split_codes`, and the
+                        // run's numbers come out wrong rather than absent -- so this
+                        // stays on in release.
+                        assert_eq!(
+                            code.len(),
+                            n,
+                            "stage {i} declared a {n}-byte code and emitted {}",
+                            code.len()
+                        );
                         out.extend_from_slice(code);
                     }
                 }
@@ -401,6 +410,39 @@ mod tests {
         }
     }
 
+    /// Identity conditioner that emits a wider code than it declares (exercises the
+    /// guard against a stage mis-declaring its width).
+    struct WrongWidth;
+    impl Primitive for WrongWidth {
+        fn describe() -> &'static str {
+            "declares a 1-byte code and emits 2 (test stage)"
+        }
+        fn encode(&self, _model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
+            vec![vec![0xAB; 2]; vectors.nrows()]
+        }
+        fn apply(&self, _model: &[u8], _vectors: &mut Array2<f32>, _codes: &[&[u8]]) {}
+        fn reconstruct(
+            &self,
+            _model: &[u8],
+            _codes: &[&[u8]],
+            child_recons: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
+            child_recons.expect("wrongwidth is not terminal").to_owned()
+        }
+        fn score(
+            &self,
+            _model: &[u8],
+            _queries: ArrayView2<f32>,
+            _codes: &[&[u8]],
+            child_scores: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
+            child_scores.expect("wrongwidth is not terminal").to_owned()
+        }
+        fn code_bytes(&self, _model: &[u8], _in_dim: usize) -> Option<usize> {
+            Some(1)
+        }
+    }
+
     /// A stage pinned to a fixed input dim (exercises the chain dim check).
     struct FixedDim(usize);
     impl Primitive for FixedDim {
@@ -495,6 +537,19 @@ mod tests {
         // Reconstruct is only exact if the variable VarTag segment is framed and
         // skipped correctly, leaving IntRound its raw bytes.
         assert_close(&codec.reconstruct(&model, &refs(&codes)), &v);
+    }
+
+    /// A stage that emits a width other than the one it declares would mis-slice every
+    /// later stage and quietly skew the run's numbers, so `encode` refuses it — in
+    /// release too, which is where the benchmarks run.
+    #[test]
+    #[should_panic(expected = "stage 0 declared a 1-byte code and emitted 2")]
+    fn a_stage_that_lies_about_its_width_is_caught() {
+        let v = data();
+        let codec =
+            AsQuantizer(Pipeline::new(3, vec![Box::new(WrongWidth), Box::new(IntRound)]).unwrap());
+        let model = codec.fit(v.view(), None);
+        codec.encode(&model, v.view());
     }
 
     #[test]

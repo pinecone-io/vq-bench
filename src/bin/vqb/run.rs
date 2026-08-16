@@ -834,9 +834,14 @@ fn encode_dataset(
         }
         let encode_s = t.elapsed().as_secs_f64();
         let encode_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
-        let (width, _) = writer.finish(encode_s, encode_peak_bytes)?;
+        let (width, code_bytes) = writer.finish(encode_s, encode_peak_bytes)?;
+        // A `None` width means the codes came out ragged, so report the mean instead.
+        let size = width.map_or_else(
+            || format!("{n_base} rows, {:.1} B avg", code_bytes as f64 / n_base as f64),
+            |w| format!("{n_base} rows × {w} B"),
+        );
         eprintln!(
-            "  {label:<22} → {} ({n_base} rows × {width} B, fit {fit_s:.1}s, enc {encode_s:.1}s, {threads} thread(s))",
+            "  {label:<22} → {} ({size}, fit {fit_s:.1}s, enc {encode_s:.1}s, {threads} thread(s))",
             path.display()
         );
     }
@@ -890,6 +895,75 @@ mod tests {
                 "chunk {chunk}"
             );
         }
+    }
+
+    /// Stub stage whose code length depends on the row's content, so a quantizer can
+    /// emit a different number of bytes per vector. Content-only, like `RowByte`, so
+    /// chunking still can't change the output.
+    struct RaggedRow;
+    impl vqb::Primitive for RaggedRow {
+        fn describe() -> &'static str {
+            "a content-length code (test stage)"
+        }
+        fn encode(&self, _m: &[u8], v: ArrayView2<f32>) -> Vec<Vec<u8>> {
+            v.rows()
+                .into_iter()
+                .map(|r| vec![r.len() as u8; r.sum().abs() as usize % 4 + 1])
+                .collect()
+        }
+        fn apply(&self, _m: &[u8], _v: &mut Array2<f32>, _c: &[&[u8]]) {}
+        fn reconstruct(&self, _m: &[u8], _c: &[&[u8]], _child: Option<ArrayView2<f32>>) -> Array2<f32> {
+            Array2::zeros((0, 0))
+        }
+        fn score(
+            &self,
+            _m: &[u8],
+            q: ArrayView2<f32>,
+            c: &[&[u8]],
+            _child: Option<ArrayView2<f32>>,
+        ) -> Array2<f32> {
+            Array2::zeros((q.nrows(), c.len()))
+        }
+        fn code_bytes(&self, _m: &[u8], _in_dim: usize) -> Option<usize> {
+            None
+        }
+    }
+
+    /// A quantizer whose per-vector code length varies survives the whole `encode`
+    /// path: chunked encode → on-disk store → read back by row index, with the size
+    /// metric reporting the actual sum of code lengths.
+    #[test]
+    fn variable_length_codes_round_trip_through_the_store() {
+        let base = Array2::from_shape_fn((25, 3), |(i, j)| (i * 2 + j) as f32 - 5.0);
+        let q = vqb::AsQuantizer(vqb::Pipeline::new(3, vec![Box::new(RaggedRow)]).unwrap());
+        let model = q.fit(base.view(), None);
+        let one_shot = q.encode(&model, base.view());
+        assert!(
+            one_shot.iter().any(|c| c.len() != one_shot[0].len()),
+            "the stub must actually produce ragged codes"
+        );
+
+        let path = std::env::temp_dir().join("vqb_run_test_variable.codes");
+        let id = codes::Identity {
+            seed: 1,
+            n_base: base.nrows(),
+            dim: 3,
+            n_fit: 25,
+            n_calib: 0,
+        };
+        let mut w = codes::CodeWriter::create(&path, &id, 1, 0.0, 0, "Stub", &model).unwrap();
+        for chunk in encode_in_chunks(&q, &model, &base, 4).chunks(4) {
+            w.push_chunk(chunk).unwrap();
+        }
+        let (width, code_bytes) = w.finish(0.0, 0).unwrap();
+        assert_eq!(width, None);
+        assert_eq!(code_bytes, one_shot.iter().map(Vec::len).sum::<usize>());
+
+        let store = codes::CodeStore::open(&path).unwrap();
+        assert_eq!(store.code_bytes(), code_bytes);
+        let gathered = Codes::Disk(store).gather(&(0..base.nrows()).collect::<Vec<_>>());
+        assert_eq!(gathered, one_shot);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

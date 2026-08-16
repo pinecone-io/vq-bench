@@ -51,8 +51,10 @@ reporting lives in `src/bin/vqb/`. Adding a primitive or quantizer does not touc
    `bench.rs`) and `results.rs` defines the JSON that comes out.
 
 Artifacts land under `results/`: `<exp>.json` (aggregated), `raw/<exp>.raw` (the capture
-`vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`) is
-a fixed-width file whose header records everything determining the codes — dataset,
+`vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`)
+addresses rows by stride while every code comes out the same width and appends a lengths
+table once one doesn't, so a quantizer may spend a different number of bytes per vector.
+Its header records everything determining the codes — dataset,
 method label, `seed`, `n_base`, `n_fit`, `n_calib` — so `run` can safely reuse a prior
 `encode`'s output, and refuses when the identity doesn't match. The header also carries
 the fit and encode cost, so a reused store reports them rather than zeros. `encode` checks the same
@@ -167,7 +169,8 @@ single neighbour.
   The pipeline uses it (with each stage's fitted model in hand) to split each combined
   code into per-stage slices, so an answer that varies row to row corrupts every
   downstream stage. A stage whose layout is learned at fit returns `None` on an empty
-  (unfitted) model.
+  (unfitted) model. `None` is also how a stage says its codes genuinely vary per vector:
+  the pipeline then length-prefixes each one, and the store keeps them ragged on disk.
 - **Score from codes, not decoded values.** In `score`, dot the query against the packed
   integer levels and correct algebraically — `cast_uint.rs` uses
   `<q, center(c)> = (<q,c> + 0.5*sum(q)) / N`. Decoding back to f32 in the hot path

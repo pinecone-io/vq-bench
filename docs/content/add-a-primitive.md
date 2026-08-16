@@ -35,7 +35,7 @@ Defaulted (override when applicable):
 | `fit(vectors, queries)` | empty model | store learned information into a model |
 | `encode(model, vectors)` | empty code per vector | generate per-vector bits |
 | `apply_queries(model, queries)` | identity | transform the batch of queries into what downstream stages see |
-| `code_bytes(model, in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed; `None` on an empty model when the layout is learned at fit |
+| `code_bytes(model, in_dim)` | `None` (varies) | specifies the length of the per-vector codes (in bytes) if fixed; `None` on an empty model when the layout is learned at fit, or whenever the codes vary per vector — the pipeline then length-prefixes each one |
 | `in_dim()` / `out_dim(in_dim)` | unchanged | specifies the input and output dimensionality of the primitive |
 
 ## Example

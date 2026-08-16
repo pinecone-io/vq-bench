@@ -256,10 +256,17 @@ impl<S: Splitter> Primitive for Split<S> {
 /// Append one component's code to a vector's combined buffer, length-prefixing iff
 /// the component is variable-width.
 fn append_component(out: &mut Vec<u8>, len: Option<usize>, code: &[u8]) {
-    if len.is_none() {
-        put_len(out, code.len());
-    } else {
-        debug_assert_eq!(len, Some(code.len()));
+    match len {
+        None => put_len(out, code.len()),
+        // A component that emits a width other than the one it declares mis-slices
+        // every later component in `split_codes`, and the run's numbers come out wrong
+        // rather than absent -- so this stays on in release.
+        Some(n) => assert_eq!(
+            code.len(),
+            n,
+            "a Split component declared a {n}-byte code and emitted {}",
+            code.len()
+        ),
     }
     out.extend_from_slice(code);
 }
@@ -362,6 +369,23 @@ mod tests {
         let mut v = math::gaussian(&mut math::seed(1), (50, 6));
         v.column_mut(0).mapv_inplace(|x| 10.0 * x);
         v
+    }
+
+    /// A component that emits a width other than the one it declares would mis-slice
+    /// every later component, so `append_component` refuses it — in release too, which
+    /// is where the benchmarks run.
+    #[test]
+    #[should_panic(expected = "declared a 2-byte code and emitted 3")]
+    fn a_component_that_lies_about_its_width_is_caught() {
+        append_component(&mut Vec::new(), Some(2), &[1, 2, 3]);
+    }
+
+    /// A component that declares itself variable is framed instead, whatever it emits.
+    #[test]
+    fn a_variable_component_is_length_prefixed() {
+        let mut out = Vec::new();
+        append_component(&mut out, None, &[1, 2, 3]);
+        assert_eq!(out, [3, 0, 0, 0, 1, 2, 3]);
     }
 
     #[test]
