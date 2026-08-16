@@ -28,6 +28,8 @@ mod dataset;
 #[cfg(feature = "hdf5")]
 mod factory;
 #[cfg(feature = "hdf5")]
+mod h5;
+#[cfg(feature = "hdf5")]
 mod raw;
 #[cfg(feature = "hdf5")]
 mod results;
@@ -42,6 +44,9 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use config::RunConfig;
+
+/// Default `--block-mb`: MiB of f32 rows held per block when streaming from disk.
+const DEFAULT_BLOCK_MB: usize = 256;
 
 #[derive(Parser)]
 #[command(
@@ -71,6 +76,14 @@ enum Command {
         /// Encode from scratch this run, ignoring any stored codes.
         #[arg(long)]
         fresh: bool,
+        /// Read the base from disk in blocks and keep the codes in a code store, so peak
+        /// memory tracks `--block-mb` rather than the dataset. Needs `n_fit` and
+        /// `n_reconstruct` set.
+        #[arg(long)]
+        stream: bool,
+        /// MiB of base rows held per streamed block.
+        #[arg(long, default_value_t = DEFAULT_BLOCK_MB, requires = "stream")]
+        block_mb: usize,
     },
     /// Run fit+encode on a config, storing the model and codes to disk for later evaluation.
     Encode {
@@ -79,6 +92,13 @@ enum Command {
         /// Encode from scratch, overwriting any stored codes instead of skipping them.
         #[arg(long)]
         fresh: bool,
+        /// Read the base from disk in blocks, so peak memory tracks `--block-mb` rather
+        /// than the dataset. Needs `n_fit` set.
+        #[arg(long)]
+        stream: bool,
+        /// MiB of base rows held per streamed block.
+        #[arg(long, default_value_t = DEFAULT_BLOCK_MB, requires = "stream")]
+        block_mb: usize,
     },
     /// Recompute metrics from a prior run's `.raw` outputs.
     Eval { config: PathBuf, raw_dir: PathBuf },
@@ -130,6 +150,13 @@ enum DataCmd {
         /// force instead of using VIBE's shipped ~100 (rebuilds in place if local).
         #[arg(long, short = 'l')]
         candidates: Option<usize>,
+        /// Copy the base one block at a time instead of loading it whole, so peak
+        /// memory tracks `--block-mb`. Needs room for a second copy on disk.
+        #[arg(long)]
+        stream: bool,
+        /// MiB of base rows held per streamed block.
+        #[arg(long, default_value_t = DEFAULT_BLOCK_MB, requires = "stream")]
+        block_mb: usize,
     },
     /// Print metadata for a dataset.
     #[command(visible_alias = "i")]
@@ -156,8 +183,15 @@ fn main() -> Result<()> {
             config,
             dry_run,
             fresh,
-        } => run(&config, dry_run, fresh),
-        Command::Encode { config, fresh } => encode(&config, fresh),
+            stream,
+            block_mb,
+        } => run(&config, dry_run, fresh, stream, block_mb),
+        Command::Encode {
+            config,
+            fresh,
+            stream,
+            block_mb,
+        } => encode(&config, fresh, stream, block_mb),
         Command::Eval { config, raw_dir } => eval(&config, &raw_dir),
         Command::Merge { inputs, out } => merge::merge(&inputs, out.as_deref()),
         Command::View {
@@ -202,17 +236,23 @@ fn data(action: DataCmd) -> Result<()> {
         DataCmd::Get {
             dataset,
             candidates,
-        } => data_get(&dataset, candidates),
+            stream,
+            block_mb,
+        } => data_get(&dataset, candidates, stream, block_mb),
     }
 }
 
 #[cfg(feature = "hdf5")]
-fn data_get(name: &str, candidates: Option<usize>) -> Result<()> {
-    dataset::get(registry::resolve(name)?, candidates)
+fn data_get(name: &str, candidates: Option<usize>, stream: bool, block_mb: usize) -> Result<()> {
+    dataset::get(
+        registry::resolve(name)?,
+        candidates,
+        read_mode(stream, block_mb),
+    )
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn data_get(_name: &str, _candidates: Option<usize>) -> Result<()> {
+fn data_get(_name: &str, _candidates: Option<usize>, _stream: bool, _mb: usize) -> Result<()> {
     bail!("`vqb data get` needs the hdf5 feature; rebuild with default features")
 }
 
@@ -235,8 +275,10 @@ fn print_arrays(_d: &registry::Dataset) -> Result<()> {
     Ok(())
 }
 
-fn run(path: &std::path::Path, dry_run: bool, fresh: bool) -> Result<()> {
+fn run(path: &Path, dry_run: bool, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
     let cfg = RunConfig::parse(path)?;
+    // Before the dry-run split, so `--dry-run --stream` reports it too.
+    config::require_streamable(&cfg, stream, true)?;
     let problems = cfg.validate();
     let runs = cfg.expand();
 
@@ -285,34 +327,46 @@ fn run(path: &std::path::Path, dry_run: bool, fresh: bool) -> Result<()> {
         }
     } else {
         config::require_valid(&cfg)?;
-        real_run(path, fresh)
+        real_run(path, fresh, stream, block_mb)
     }
 }
 
 #[cfg(feature = "hdf5")]
-fn real_run(path: &Path, fresh: bool) -> Result<()> {
-    run::run(path, fresh)
+fn real_run(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
+    run::run(path, fresh, read_mode(stream, block_mb))
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn real_run(_path: &Path, _fresh: bool) -> Result<()> {
+fn real_run(_path: &Path, _fresh: bool, _stream: bool, _mb: usize) -> Result<()> {
     bail!("`vqb run` needs the hdf5 feature; rebuild with default features")
 }
 
-fn encode(path: &Path, fresh: bool) -> Result<()> {
+fn encode(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
     let cfg = RunConfig::parse(path)?;
     config::require_valid(&cfg)?;
-    real_encode(path, fresh)
+    // `encode` builds no reconstruction references, so `n_reconstruct` is free here.
+    config::require_streamable(&cfg, stream, false)?;
+    real_encode(path, fresh, stream, block_mb)
 }
 
 #[cfg(feature = "hdf5")]
-fn real_encode(path: &Path, fresh: bool) -> Result<()> {
-    run::encode_to_disk(path, fresh)
+fn real_encode(path: &Path, fresh: bool, stream: bool, block_mb: usize) -> Result<()> {
+    run::encode_to_disk(path, fresh, read_mode(stream, block_mb))
 }
 
 #[cfg(not(feature = "hdf5"))]
-fn real_encode(_path: &Path, _fresh: bool) -> Result<()> {
+fn real_encode(_path: &Path, _fresh: bool, _stream: bool, _mb: usize) -> Result<()> {
     bail!("`vqb encode` needs the hdf5 feature; rebuild with default features")
+}
+
+/// How the base is read for a run: whole, or in `block_mb` blocks off disk.
+#[cfg(feature = "hdf5")]
+fn read_mode(stream: bool, block_mb: usize) -> dataset::Mode {
+    if stream {
+        dataset::Mode::Stream { block_mb }
+    } else {
+        dataset::Mode::Resident
+    }
 }
 
 #[cfg(feature = "hdf5")]

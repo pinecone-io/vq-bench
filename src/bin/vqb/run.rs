@@ -14,7 +14,7 @@ use std::io::Write;
 use vqb::Quantizer;
 
 use crate::config::{ResolvedMethod, RunConfig};
-use crate::dataset::{self, Loaded};
+use crate::dataset::{self, Base, Loaded};
 use crate::results::{Run, RunMeta, Timing};
 use crate::{aggregate, bench, codes, config, factory, mem, raw, registry, results};
 use raw::{RawDataset, RawMeta, RawMethod};
@@ -53,14 +53,19 @@ fn subset_indices(len: usize, n: usize, seed: u64) -> Vec<usize> {
 // Seeded subsamples shared by `run` and `encode` so both see the same DB, calib,
 // and fit rows (encoded codes must align row-for-row with what `run` addresses).
 
-/// The searched DB as a subsample of `base`, or `None` to use the full base.
-fn db_subsample(loaded: &Loaded, cfg: &RunConfig) -> Option<Array2<f32>> {
+/// The searched DB as a subsample of `base`, or `None` to use the full base. A streamed
+/// base is gathered into memory here: `subset_indices` shuffles, so DB row order does not
+/// follow file order, and streaming it would cost a positioned read per row.
+fn db_subsample(loaded: &Loaded, cfg: &RunConfig) -> Result<Option<Base>> {
     let idx = subset_indices(
         loaded.base.nrows(),
         cfg.n_base.unwrap_or(usize::MAX),
         cfg.seed ^ 0xba5e,
     );
-    (idx.len() != loaded.base.nrows()).then(|| loaded.base.select(Axis(0), &idx))
+    if idx.len() == loaded.base.nrows() {
+        return Ok(None);
+    }
+    Ok(Some(Base::Mem(loaded.base.gather(&idx)?)))
 }
 
 /// The calibration queries passed to `fit`, subsampled from `calib`.
@@ -72,14 +77,28 @@ fn calib_subsample(loaded: &Loaded, cfg: &RunConfig) -> Option<Array2<f32>> {
 }
 
 /// The base rows used only for `fit`, or `None` to fit on the whole DB.
-fn fit_subsample(db: &Array2<f32>, cfg: &RunConfig) -> Option<Array2<f32>> {
+fn fit_subsample(db: &Base, cfg: &RunConfig) -> Result<Option<Array2<f32>>> {
     let idx = subset_indices(db.nrows(), cfg.n_fit.unwrap_or(usize::MAX), cfg.seed ^ 0xf17f);
-    (idx.len() != db.nrows()).then(|| db.select(Axis(0), &idx))
+    if idx.len() == db.nrows() {
+        return Ok(None);
+    }
+    Ok(Some(db.gather(&idx)?))
+}
+
+/// The rows `fit` sees: the `n_fit` subsample, or the whole DB when unset. Unset only
+/// works on a resident DB, which `config::require_streamable` has already established.
+fn fit_rows<'a>(db: &'a Base, fit: Option<&'a Array2<f32>>) -> Result<ArrayView2<'a, f32>> {
+    match fit {
+        Some(f) => Ok(f.view()),
+        None => db
+            .resident()
+            .context("`--stream` needs `n_fit` set: fit would otherwise read the whole base"),
+    }
 }
 
 /// The `(n_base, n_fit, n_calib)` the subsamples above resolve to, from row counts
 /// alone — `subset_indices` keeps `min(n, len)` rows, so a code file's identity can
-/// be derived from a dataset's shapes before it is loaded. `identity_of` asserts the
+/// be derived from a dataset's shapes before it is loaded. `check_identity` asserts the
 /// two agree.
 fn resolved_counts(
     base_rows: usize,
@@ -92,35 +111,46 @@ fn resolved_counts(
     (n_base, n_fit, n_calib)
 }
 
-/// The code-file identity for a loaded dataset's resolved subsamples. Asserts it
-/// against the shape-only `resolved_counts` on every run: `encode` skips a dataset
-/// on the shape-derived identity, so a drift between the two would silently skip
-/// work that `run` then treats as a cache miss.
-fn identity_of(
-    loaded: &Loaded,
-    db: &Array2<f32>,
-    fit: Option<&Array2<f32>>,
-    calib: Option<&Array2<f32>>,
+/// The code-file identity a config resolves to, from row counts alone. The one place it
+/// is built: `encode` needs it before the load to decide whether to skip a dataset, and
+/// `run` needs it before deciding whether to gather any rows at all.
+fn identity_for(
+    base_rows: usize,
+    calib_rows: Option<usize>,
+    dim: usize,
     cfg: &RunConfig,
 ) -> codes::Identity {
-    let (n_base, dim) = db.dim();
-    let id = codes::Identity {
+    let (n_base, n_fit, n_calib) = resolved_counts(base_rows, calib_rows, cfg);
+    codes::Identity {
         seed: cfg.seed,
         n_base,
         dim,
-        n_fit: fit.map_or(n_base, Array2::nrows),
-        n_calib: calib.map_or(0, Array2::nrows),
-    };
+        n_fit,
+        n_calib,
+    }
+}
+
+/// Assert the subsamples actually gathered match the identity their codes will be filed
+/// under. A drift would mean a model fitted on one row count recorded as another, so
+/// `run` would reuse codes for a config `encode` never saw — checked on every encode
+/// rather than left to a test, since it is silent and the codes outlive the run.
+fn check_identity(
+    id: &codes::Identity,
+    db: &Base,
+    fit: Option<&Array2<f32>>,
+    calib: Option<&Array2<f32>>,
+) {
+    let (n_base, dim) = db.dim();
     assert_eq!(
-        (id.n_base, id.n_fit, id.n_calib),
-        resolved_counts(
-            loaded.base.nrows(),
-            loaded.calib.as_ref().map(Array2::nrows),
-            cfg
+        (
+            n_base,
+            dim,
+            fit.map_or(n_base, Array2::nrows),
+            calib.map_or(0, Array2::nrows)
         ),
-        "resolved row counts disagree with the loaded subsamples"
+        (id.n_base, id.dim, id.n_fit, id.n_calib),
+        "gathered subsamples disagree with the resolved row counts"
     );
-    id
 }
 
 /// avg/p50/p90/p99 over per-query latencies (µs).
@@ -198,7 +228,7 @@ const ENCODE_CHUNK: usize = 8192;
 fn encode_in_chunks<Q: Quantizer + ?Sized>(
     q: &Q,
     model: &[u8],
-    base: &Array2<f32>,
+    base: ArrayView2<f32>,
     chunk: usize,
 ) -> Vec<Vec<u8>> {
     let n = base.nrows();
@@ -215,14 +245,113 @@ fn encode_in_chunks<Q: Quantizer + ?Sized>(
         .collect()
 }
 
-/// Exact dot products of each eval query against its candidates.
-fn true_scores(eval: &Array2<f32>, base: &Array2<f32>, candidates: &[Vec<usize>]) -> Vec<Vec<f32>> {
+/// Say what a streamed run is doing, since it changes both where the codes live and what
+/// `encode_memory` counts.
+fn announce_stream(mode: dataset::Mode, threads: usize) {
+    if let dataset::Mode::Stream { block_mb } = mode {
+        eprintln!(
+            "--stream: base read from disk in ≤{block_mb} MiB blocks, codes written to \
+             results/codes/ ({threads}-chunk window; encode_memory includes the read block)"
+        );
+    }
+}
+
+/// Rows per read block, and rows per encode chunk within it. The block is what a streamed
+/// base reads at once, so `--block-mb` caps it; the chunk then splits the block across the
+/// workers, which is what keeps a tight budget costing memory rather than parallelism.
+/// Encode is neighbor-blind, so the split is free to move — any chunking produces the same
+/// codes (`encode_in_chunks_matches_one_shot`).
+fn encode_shape(dim: usize, threads: usize, mode: dataset::Mode) -> (usize, usize) {
+    let workers = threads.max(1);
+    let block = match mode {
+        dataset::Mode::Resident => workers * ENCODE_CHUNK,
+        dataset::Mode::Stream { block_mb } => {
+            ((block_mb << 20) / (dim.max(1) * 4)).clamp(1, workers * ENCODE_CHUNK)
+        }
+    };
+    (block, (block / workers).clamp(1, ENCODE_CHUNK))
+}
+
+/// How a finished store's size reads: a stride when every code matched the last, the
+/// mean when they came out ragged and rows are addressed by the lengths table.
+fn store_size(store: &codes::CodeStore, n_base: usize) -> String {
+    store.width().map_or_else(
+        || {
+            format!(
+                "{n_base} rows, {:.1} B avg",
+                store.code_bytes() as f64 / n_base.max(1) as f64
+            )
+        },
+        |w| format!("{n_base} rows × {w} B"),
+    )
+}
+
+/// Fit `q`, encode the DB into a fresh code store at `path`, and reopen it. Shared by
+/// `encode` and a streamed `run`, so both produce byte-identical stores.
+///
+/// Chunks within a block run concurrently but flush in row order, so the store matches a
+/// serial encode at any thread count and any `(block, chunk)` split. Bit-for-bit, except
+/// where a quantizer's `encode` runs a batched matmul: the accumulation order depends on
+/// the batch shape, so a handful of codes can land the other side of a rounding boundary.
+#[allow(clippy::too_many_arguments)]
+fn fit_and_store(
+    q: &dyn Quantizer,
+    path: &Path,
+    id: &codes::Identity,
+    label: &str,
+    db: &Base,
+    fit_base: ArrayView2<f32>,
+    calib: Option<ArrayView2<f32>>,
+    threads: usize,
+    shape: (usize, usize),
+    scratch: &mut Vec<f32>,
+) -> Result<codes::CodeStore> {
+    let (block, chunk) = shape;
+    let baseline = mem::current();
+    mem::reset_peak();
+    let t = Instant::now();
+    let model = q.fit(fit_base, calib);
+    let fit_s = t.elapsed().as_secs_f64();
+    let fit_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
+
+    let mut writer =
+        codes::CodeWriter::create(path, id, threads, fit_s, fit_peak_bytes, label, &model)?;
+    // Baseline taken after fit, so the retained model counts as encode's ground
+    // rather than as encode's growth.
+    let baseline = mem::current();
+    mem::reset_peak();
+    let t = Instant::now();
+    db.for_blocks(block, scratch, |_, rows| {
+        let n = rows.nrows();
+        let ranges: Vec<(usize, usize)> = (0..n)
+            .step_by(chunk)
+            .map(|s| (s, (s + chunk).min(n)))
+            .collect();
+        let encoded: Vec<Vec<Vec<u8>>> = ranges
+            .par_iter()
+            .map(|&(a, b)| q.encode(&model, rows.slice(s![a..b, ..])))
+            .collect();
+        for chunk in &encoded {
+            writer.push_chunk(chunk)?;
+        }
+        Ok(())
+    })?;
+    let encode_s = t.elapsed().as_secs_f64();
+    let encode_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
+    writer.finish(encode_s, encode_peak_bytes)?;
+    codes::CodeStore::open(path)
+}
+
+/// Exact dot products of each eval query against its candidates, gathering one query's
+/// candidate rows at a time so a streamed base never holds more than a single pool.
+fn true_scores(eval: &Array2<f32>, db: &Base, candidates: &[Vec<usize>]) -> Result<Vec<Vec<f32>>> {
     candidates
         .iter()
         .enumerate()
         .map(|(qi, cand)| {
+            let rows = db.gather(cand)?;
             let q = eval.row(qi);
-            cand.iter().map(|&i| q.dot(&base.row(i))).collect()
+            Ok(rows.rows().into_iter().map(|r| q.dot(&r)).collect())
         })
         .collect()
 }
@@ -231,28 +360,8 @@ fn rows_to_vec(a: &Array2<f32>) -> Vec<Vec<f32>> {
     a.rows().into_iter().map(|r| r.to_vec()).collect()
 }
 
-/// Exact top-`l` candidates (indices into `db`) and their true scores, per eval query.
-/// Used when the searched DB is subsampled, since the dataset's shipped neighbors index
-/// the full base and no longer apply.
-fn recompute_candidates(
-    eval: &Array2<f32>,
-    db: &Array2<f32>,
-    l: usize,
-) -> (Vec<Vec<usize>>, Vec<Vec<f32>>) {
-    let scores = vqb::matmul(eval.view(), db.t()); // n_eval × n_db
-    let l = l.min(db.nrows());
-    let mut candidates = Vec::with_capacity(eval.nrows());
-    let mut truths = Vec::with_capacity(eval.nrows());
-    for row in scores.rows() {
-        let s = row.to_vec();
-        let mut idx: Vec<usize> = (0..s.len()).collect();
-        idx.sort_by(|&a, &b| s[b].partial_cmp(&s[a]).unwrap_or(std::cmp::Ordering::Equal));
-        idx.truncate(l);
-        truths.push(idx.iter().map(|&i| s[i]).collect());
-        candidates.push(idx);
-    }
-    (candidates, truths)
-}
+// A subsampled DB's candidates come from `dataset::top_candidates`, which folds the DB one
+// block at a time instead of materializing an `n_eval × n_db` score matrix.
 
 // --- progress table --------------------------------------------------------
 
@@ -323,7 +432,7 @@ fn row_tail(
 fn run_method(
     label: String,
     q: &dyn Quantizer,
-    base: &Array2<f32>,
+    base: ArrayView2<f32>,
     fit_base: ArrayView2<f32>,
     eval: &Array2<f32>,
     calib: Option<&Array2<f32>>,
@@ -465,19 +574,42 @@ fn score_and_reconstruct(
 /// to `writer` and reducing it to results as it finishes (so the whole run's
 /// scores/reconstructions never sit in memory at once). Returns the reduced
 /// per-dataset results.
+#[allow(clippy::too_many_arguments)]
 fn run_dataset<W: std::io::Write>(
     name: &str,
     loaded: &Loaded,
     methods: &[ResolvedMethod],
     cfg: &RunConfig,
     fresh: bool,
+    mode: dataset::Mode,
+    threads: usize,
     writer: &mut raw::RawWriter<W>,
 ) -> Result<results::DatasetResult> {
     // The searched DB: the full base, or a seeded subsample when `n_base` is set.
-    let db_storage = db_subsample(loaded, cfg);
+    let db_storage = db_subsample(loaded, cfg)?;
     let subsampled = db_storage.is_some();
     let db = db_storage.as_ref().unwrap_or(&loaded.base);
     let (n_base, dim) = db.dim();
+    // What a stored code file must match to be reusable here, from row counts alone —
+    // which is what lets the encode-side costs below wait on a cache miss.
+    let id = identity_for(
+        loaded.base.nrows(),
+        loaded.calib.as_ref().map(Array2::nrows),
+        dim,
+        cfg,
+    );
+    // Whether anything will actually be encoded. Both the fit rows and the read buffer are
+    // encode-side costs, and gathering `n_fit` rows off a streamed base is a positioned
+    // read each, so neither is paid for a dataset whose every method is already stored.
+    let encoding = fresh
+        || methods
+            .iter()
+            .any(|m| id.stored(name, &m.label(vqb::catalog::display(&m.name))).is_none());
+    // One read buffer for every method's encode pass, sized and allocated before the first
+    // `encode_peak_bytes` window so the metric is never charged for it.
+    let shape = encode_shape(dim, threads, mode);
+    let mut scratch =
+        vec![0f32; if encoding && db.resident().is_none() { shape.0 * dim } else { 0 }];
 
     let eval_idx = subset_indices(
         loaded.eval.nrows(),
@@ -490,13 +622,14 @@ fn run_dataset<W: std::io::Write>(
     // so a subsampled DB must recompute the exact top-L candidates over the subsample.
     let cand_width = loaded.eval_candidates.first().map_or(0, Vec::len);
     let (candidates, true_scores) = if subsampled {
-        recompute_candidates(&eval, db, cand_width)
+        // The subsample is resident (see `db_subsample`), so this pass owns its buffer.
+        dataset::top_candidates(&eval, db, cand_width, &mut Vec::new())?
     } else {
         let cands: Vec<Vec<usize>> = eval_idx
             .iter()
             .map(|&i| loaded.eval_candidates[i].clone())
             .collect();
-        let truths = true_scores(&eval, db, &cands);
+        let truths = true_scores(&eval, db, &cands)?;
         (cands, truths)
     };
     let n_candidates = candidates.first().map_or(0, Vec::len);
@@ -516,16 +649,18 @@ fn run_dataset<W: std::io::Write>(
         cfg.n_reconstruct.unwrap_or(usize::MAX),
         cfg.seed ^ 0xF17,
     );
-    let references: Vec<Vec<f32>> = recon_idx.iter().map(|&i| db.row(i).to_vec()).collect();
+    let references = rows_to_vec(&db.gather(&recon_idx)?);
 
     let calib = calib_subsample(loaded, cfg);
 
     // Base rows used only for `fit` (encode/score still run over the whole DB).
-    let fit_storage = fit_subsample(db, cfg);
-
-    // What a stored code file must match to be reusable here. Built identically in
-    // `encode_dataset`, so the two commands agree on every hit and miss.
-    let id = identity_of(loaded, db, fit_storage.as_ref(), calib.as_ref(), cfg);
+    let fit_storage = if encoding {
+        let fit = fit_subsample(db, cfg)?;
+        check_identity(&id, db, fit.as_ref(), calib.as_ref());
+        fit
+    } else {
+        None
+    };
 
     // The dataset's shared facts (no methods yet); `true_scores`/`references` move
     // in and are read back from `head` for scoring metrics and the progress table.
@@ -567,21 +702,37 @@ fn run_dataset<W: std::io::Write>(
         let cached = if fresh { None } else { id.stored(name, &label) };
         // Thread count the cached codes were encoded with (for the reuse note).
         let reused_threads = cached.as_ref().map(codes::CodeStore::threads);
-        let rm = match cached {
-            Some(store) => run_method_cached(label, &*q, store, dim, &eval, &candidates, &recon_idx),
-            None => {
-                let fit_base = fit_storage.as_ref().map_or_else(|| db.view(), |f| f.view());
-                run_method(
-                    label,
-                    &*q,
-                    db,
-                    fit_base,
-                    &eval,
-                    calib.as_ref(),
-                    &candidates,
-                    &recon_idx,
-                )
+        let rm = match (cached, db.resident()) {
+            (Some(store), _) => {
+                run_method_cached(label, &*q, store, dim, &eval, &candidates, &recon_idx)
             }
+            // Streamed: the code set has no more business in memory than the base does, so
+            // encode through the store and score from it, exactly as `encode` + `run` would.
+            (None, None) => {
+                let store = fit_and_store(
+                    &*q,
+                    &cache_path,
+                    &id,
+                    &label,
+                    db,
+                    fit_rows(db, fit_storage.as_ref())?,
+                    calib.as_ref().map(Array2::view),
+                    threads,
+                    shape,
+                    &mut scratch,
+                )?;
+                run_method_cached(label, &*q, store, dim, &eval, &candidates, &recon_idx)
+            }
+            (None, Some(base)) => run_method(
+                label,
+                &*q,
+                base,
+                fit_rows(db, fit_storage.as_ref())?,
+                &eval,
+                calib.as_ref(),
+                &candidates,
+                &recon_idx,
+            ),
         };
         eprintln!(
             "{}",
@@ -626,13 +777,14 @@ fn run_dataset<W: std::io::Write>(
 
 /// `vqb run <config>`: run the config, writing `results/raw/<exp>.raw` and
 /// `results/<exp>.json`.
-pub fn run(config_path: &Path, fresh: bool) -> Result<()> {
+pub fn run(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
     config::require_valid(&cfg)?;
     let exp = config_stem(config_path);
     let methods = cfg.expand();
     let threads = init_thread_pool(cfg.threads);
     eprintln!("encoding with {threads} thread(s)");
+    announce_stream(mode, threads);
     if fresh {
         eprintln!("--fresh: ignoring stored codes, encoding from scratch");
     }
@@ -665,9 +817,18 @@ pub fn run(config_path: &Path, fresh: bool) -> Result<()> {
         eprint!("\nloading {} … ", entry.name);
         let _ = std::io::stderr().flush();
         let t = Instant::now();
-        let loaded = dataset::load(&entry.local_path())?;
+        let loaded = dataset::load(&entry.local_path(), mode)?;
         eprintln!("{:.1}s", t.elapsed().as_secs_f64());
-        datasets.push(run_dataset(entry.name, &loaded, &methods, &cfg, fresh, &mut writer)?);
+        datasets.push(run_dataset(
+            entry.name,
+            &loaded,
+            &methods,
+            &cfg,
+            fresh,
+            mode,
+            threads,
+            &mut writer,
+        )?);
     }
     writer.finish()?;
 
@@ -717,12 +878,13 @@ pub fn eval(config_path: &Path, raw_arg: &Path) -> Result<()> {
 /// No scoring or reconstruction — this is the memory-bounded encode pass. Methods
 /// whose codes are already stored under a matching identity are skipped unless
 /// `fresh`.
-pub fn encode_to_disk(config_path: &Path, fresh: bool) -> Result<()> {
+pub fn encode_to_disk(config_path: &Path, fresh: bool, mode: dataset::Mode) -> Result<()> {
     let cfg = RunConfig::parse(config_path)?;
     config::require_valid(&cfg)?;
     let methods = cfg.expand();
     let threads = init_thread_pool(cfg.threads);
     eprintln!("encoding with {threads} thread(s)");
+    announce_stream(mode, threads);
     if fresh {
         eprintln!("--fresh: ignoring stored codes, encoding from scratch");
     }
@@ -742,9 +904,9 @@ pub fn encode_to_disk(config_path: &Path, fresh: bool) -> Result<()> {
         eprint!("\nloading {} … ", entry.name);
         let _ = std::io::stderr().flush();
         let t = Instant::now();
-        let loaded = dataset::load(&entry.local_path())?;
+        let loaded = dataset::load(&entry.local_path(), mode)?;
         eprintln!("{:.1}s", t.elapsed().as_secs_f64());
-        encode_dataset(entry.name, &loaded, &methods, &cfg, threads, fresh)?;
+        encode_dataset(entry.name, &loaded, &methods, &cfg, mode, threads, fresh)?;
     }
     Ok(())
 }
@@ -756,14 +918,7 @@ fn fully_encoded(entry: &registry::Dataset, methods: &[ResolvedMethod], cfg: &Ru
     let Ok(shapes) = dataset::identity_shapes(&entry.local_path()) else {
         return false;
     };
-    let (n_base, n_fit, n_calib) = resolved_counts(shapes.base_rows, shapes.calib_rows, cfg);
-    let id = codes::Identity {
-        seed: cfg.seed,
-        n_base,
-        dim: shapes.dim,
-        n_fit,
-        n_calib,
-    };
+    let id = identity_for(shapes.base_rows, shapes.calib_rows, shapes.dim, cfg);
     methods.iter().all(|m| {
         let label = m.label(vqb::catalog::display(&m.name));
         id.stored(entry.name, &label).is_some()
@@ -778,21 +933,26 @@ fn encode_dataset(
     loaded: &Loaded,
     methods: &[ResolvedMethod],
     cfg: &RunConfig,
+    mode: dataset::Mode,
     threads: usize,
     fresh: bool,
 ) -> Result<()> {
-    let db_storage = db_subsample(loaded, cfg);
+    let db_storage = db_subsample(loaded, cfg)?;
     let db = db_storage.as_ref().unwrap_or(&loaded.base);
     let (n_base, dim) = db.dim();
     let calib = calib_subsample(loaded, cfg);
-    let fit_storage = fit_subsample(db, cfg);
-    let id = identity_of(loaded, db, fit_storage.as_ref(), calib.as_ref(), cfg);
-
-    // Encode chunks concurrently but flush them in row order, so the on-disk codes are
-    // byte-identical to a serial encode regardless of thread count. Processing one
-    // window of `threads` chunks at a time bounds peak memory to ~that many chunks —
-    // the disk store, not RAM, holds the full code set.
-    let window = threads.max(1);
+    let fit_storage = fit_subsample(db, cfg)?;
+    let id = identity_for(
+        loaded.base.nrows(),
+        loaded.calib.as_ref().map(Array2::nrows),
+        dim,
+        cfg,
+    );
+    check_identity(&id, db, fit_storage.as_ref(), calib.as_ref());
+    // As in `run_dataset`: one read buffer for every method, allocated before the first
+    // measurement window.
+    let shape = encode_shape(dim, threads, mode);
+    let mut scratch = vec![0f32; if db.resident().is_some() { 0 } else { shape.0 * dim }];
 
     for m in methods {
         let label = m.label(vqb::catalog::display(&m.name));
@@ -804,45 +964,24 @@ fn encode_dataset(
             continue;
         }
         let q = factory::build(m, cfg.seed, dim)?;
-        let fit_base = fit_storage.as_ref().map_or_else(|| db.view(), |f| f.view());
-        let baseline = mem::current();
-        mem::reset_peak();
-        let t = Instant::now();
-        let model = q.fit(fit_base, calib.as_ref().map(|c| c.view()));
-        let fit_s = t.elapsed().as_secs_f64();
-        let fit_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
-
-        let mut writer =
-            codes::CodeWriter::create(&path, &id, threads, fit_s, fit_peak_bytes, &label, &model)?;
-        // Baseline taken after fit, so the retained model counts as encode's ground
-        // rather than as encode's growth.
-        let baseline = mem::current();
-        mem::reset_peak();
-        let t = Instant::now();
-        let ranges: Vec<(usize, usize)> = (0..n_base)
-            .step_by(ENCODE_CHUNK)
-            .map(|s| (s, (s + ENCODE_CHUNK).min(n_base)))
-            .collect();
-        for group in ranges.chunks(window) {
-            let encoded: Vec<Vec<Vec<u8>>> = group
-                .par_iter()
-                .map(|&(start, end)| q.encode(&model, db.slice(s![start..end, ..])))
-                .collect();
-            for chunk in &encoded {
-                writer.push_chunk(chunk)?;
-            }
-        }
-        let encode_s = t.elapsed().as_secs_f64();
-        let encode_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
-        let (width, code_bytes) = writer.finish(encode_s, encode_peak_bytes)?;
-        // A `None` width means the codes came out ragged, so report the mean instead.
-        let size = width.map_or_else(
-            || format!("{n_base} rows, {:.1} B avg", code_bytes as f64 / n_base as f64),
-            |w| format!("{n_base} rows × {w} B"),
-        );
+        let store = fit_and_store(
+            &*q,
+            &path,
+            &id,
+            &label,
+            db,
+            fit_rows(db, fit_storage.as_ref())?,
+            calib.as_ref().map(Array2::view),
+            threads,
+            shape,
+            &mut scratch,
+        )?;
         eprintln!(
-            "  {label:<22} → {} ({size}, fit {fit_s:.1}s, enc {encode_s:.1}s, {threads} thread(s))",
-            path.display()
+            "  {label:<22} → {} ({}, fit {:.1}s, enc {:.1}s, {threads} thread(s))",
+            path.display(),
+            store_size(&store, n_base),
+            store.fit_s(),
+            store.encode_s(),
         );
     }
     Ok(())
@@ -890,7 +1029,7 @@ mod tests {
         // the row order is preserved.
         for chunk in [1usize, 4, 5, 25, 100] {
             assert_eq!(
-                encode_in_chunks(&q, &model, &base, chunk),
+                encode_in_chunks(&q, &model, base.view(), chunk),
                 one_shot,
                 "chunk {chunk}"
             );
@@ -952,7 +1091,7 @@ mod tests {
             n_calib: 0,
         };
         let mut w = codes::CodeWriter::create(&path, &id, 1, 0.0, 0, "Stub", &model).unwrap();
-        for chunk in encode_in_chunks(&q, &model, &base, 4).chunks(4) {
+        for chunk in encode_in_chunks(&q, &model, base.view(), 4).chunks(4) {
             w.push_chunk(chunk).unwrap();
         }
         let (width, code_bytes) = w.finish(0.0, 0).unwrap();
@@ -966,24 +1105,24 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// A block read serves at most one chunk per worker, and is a whole number of chunks
+    /// so a streamed encode splits at the same rows a resident one does.
     #[test]
-    fn recompute_candidates_picks_exact_top_l() {
-        // One query [1,0]; dots with db rows: 0.0, 1.0, 0.5, -1.0 → top-2 is rows 1 then 2.
-        let eval = Array2::from_shape_vec((1, 2), vec![1.0, 0.0]).unwrap();
-        let db = Array2::from_shape_vec((4, 2), vec![0., 1., 1., 0., 0.5, 0., -1., 0.]).unwrap();
-        let (cands, truths) = recompute_candidates(&eval, &db, 2);
-        assert_eq!(cands, vec![vec![1, 2]]);
-        assert_eq!(truths, vec![vec![1.0, 0.5]]);
-        // Scores are descending within each query's candidates.
-        assert!(truths[0].windows(2).all(|w| w[0] >= w[1]));
-    }
-
-    #[test]
-    fn recompute_candidates_clamps_l_to_db_size() {
-        let eval = Array2::from_shape_vec((1, 2), vec![1.0, 0.0]).unwrap();
-        let db = Array2::from_shape_vec((2, 2), vec![1., 0., 0., 1.]).unwrap();
-        let (cands, _) = recompute_candidates(&eval, &db, 100);
-        assert_eq!(cands[0].len(), 2);
+    fn encode_shape_keeps_parallelism_within_the_budget() {
+        let mb = |n| dataset::Mode::Stream { block_mb: n };
+        // Resident: a chunk per worker, full chunks — unchanged from before streaming.
+        assert_eq!(encode_shape(768, 8, dataset::Mode::Resident), (8 * ENCODE_CHUNK, ENCODE_CHUNK));
+        // A generous budget lands in the same place.
+        assert_eq!(encode_shape(768, 8, mb(4096)), (8 * ENCODE_CHUNK, ENCODE_CHUNK));
+        // A tight one shrinks the block *and* the chunk, so all 8 workers still get work.
+        for budget in [1usize, 16, 64] {
+            let (block, chunk) = encode_shape(768, 8, mb(budget));
+            assert!(block * 768 * 4 <= (budget << 20).max(3072), "budget {budget}");
+            assert_eq!(chunk, (block / 8).clamp(1, ENCODE_CHUNK), "budget {budget}");
+            assert!(block >= chunk * 7, "budget {budget}: block splits over the workers");
+        }
+        // Never zero, however small the budget.
+        assert_eq!(encode_shape(768, 8, mb(0)), (1, 1));
     }
 
     fn cfg_with(n_base: Option<usize>, n_fit: Option<usize>, n_calib: Option<usize>) -> RunConfig {
@@ -1024,12 +1163,12 @@ mod tests {
     }
 
     /// `encode` skips a dataset on the shape-derived identity while `run` builds it
-    /// from the loaded arrays; `identity_of` asserts the two agree, so drive it over
+    /// from the loaded arrays; `check_identity` asserts the two agree, so drive it over
     /// the config shapes that make the subsamples differ.
     #[test]
     fn identity_agrees_with_the_loaded_subsamples() {
         let loaded = Loaded {
-            base: Array2::from_shape_fn((50, 4), |(i, j)| (i + j) as f32),
+            base: Base::Mem(Array2::from_shape_fn((50, 4), |(i, j)| (i + j) as f32)),
             eval: Array2::zeros((2, 4)),
             calib: Some(Array2::zeros((20, 4))),
             eval_candidates: vec![vec![0], vec![1]],
@@ -1041,11 +1180,12 @@ mod tests {
             (Some(50), None, None), // n_base == base rows: no subsample allocated
         ] {
             let cfg = cfg_with(nb, nf, nc);
-            let db_storage = db_subsample(&loaded, &cfg);
+            let db_storage = db_subsample(&loaded, &cfg).unwrap();
             let db = db_storage.as_ref().unwrap_or(&loaded.base);
             let calib = calib_subsample(&loaded, &cfg);
-            let fit = fit_subsample(db, &cfg);
-            let id = identity_of(&loaded, db, fit.as_ref(), calib.as_ref(), &cfg);
+            let fit = fit_subsample(db, &cfg).unwrap();
+            let id = identity_for(loaded.base.nrows(), Some(20), 4, &cfg);
+            check_identity(&id, db, fit.as_ref(), calib.as_ref());
             assert_eq!((id.seed, id.dim), (7, 4));
         }
     }

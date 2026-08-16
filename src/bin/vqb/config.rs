@@ -282,6 +282,31 @@ pub fn require_valid(cfg: &RunConfig) -> Result<()> {
     Ok(())
 }
 
+/// What `--stream` additionally demands of a config. Two counts default to *every* DB row,
+/// which is exactly what a streamed run must not materialize: `n_fit` is handed to `fit` in
+/// one piece, and `n_reconstruct` decides the `references` the raw capture carries. Both
+/// have to be set, and `--dry-run` reports it before anything is read.
+pub fn require_streamable(cfg: &RunConfig, stream: bool, needs_recon: bool) -> Result<()> {
+    if !stream {
+        return Ok(());
+    }
+    let mut problems = Vec::new();
+    if cfg.n_fit.is_none() {
+        problems.push("set `n_fit`: `fit` would otherwise be handed the whole base at once");
+    }
+    if needs_recon && cfg.n_reconstruct.is_none() {
+        problems
+            .push("set `n_reconstruct`: the reconstruction references default to every DB row");
+    }
+    if !problems.is_empty() {
+        bail!(
+            "`--stream` needs a bounded config:\n  - {}",
+            problems.join("\n  - ")
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

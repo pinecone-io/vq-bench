@@ -421,6 +421,14 @@ impl CodeStore {
     pub fn code_bytes(&self) -> usize {
         self.code_bytes
     }
+    /// Bytes per stored code, or `None` when the rows are ragged and addressed by the
+    /// lengths table rather than by a stride — mirroring what `CodeWriter::finish` returns.
+    pub fn width(&self) -> Option<usize> {
+        match self.layout {
+            Layout::Fixed(w) => Some(w),
+            Layout::Variable(_) => None,
+        }
+    }
     pub fn encode_s(&self) -> f64 {
         self.encode_s
     }

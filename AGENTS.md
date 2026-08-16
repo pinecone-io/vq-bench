@@ -50,6 +50,18 @@ reporting lives in `src/bin/vqb/`. Adding a primitive or quantizer does not touc
    memory at once. `aggregate.rs` reduces them to the requested metrics (computed in
    `bench.rs`) and `results.rs` defines the JSON that comes out.
 
+`--stream` (on `data get`, `encode`, and `run`) leaves the base on disk and reads it a
+block at a time, so peak memory tracks `--block-mb` rather than the dataset; a streamed
+`run` encodes through the code store too, rather than holding the code set. `Base` picks
+between the two, and the bounded index sets (`fit`, the reconstruction sample, a query's
+candidate pool) go through its `gather` either way. Row-block I/O lives in `h5.rs`, which
+calls `H5Dread`/`H5Dwrite` on flat `[f32]` while holding `hdf5_sys::LOCK` — the reentrant
+mutex hdf5-metno takes around its own calls, since libhdf5 keeps global state. It is
+raw FFI because hdf5-metno's hyperslab wrappers are typed in *its* ndarray, which it
+accepts anywhere in `>=0.15, <=0.17` and so need not be the 0.16 this crate shares with
+linfa. **Nothing outside `h5.rs` may cross that boundary**: every other HDF5 call in the
+tree is `read_raw`/`write_raw` over `Vec`s, and must stay that way.
+
 Artifacts land under `results/`: `<exp>.json` (aggregated), `raw/<exp>.raw` (the capture
 `vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`)
 addresses rows by stride while every code comes out the same width and appends a lengths
@@ -66,8 +78,8 @@ Three things the **harness** owns, deliberately kept out of quantizers:
 
 - **Size accounting.** `byte_split` measures the model and codes the quantizer actually
   produced, so a quantizer cannot misreport its own footprint.
-- **Memory and parallelism policy.** Chunk size, the thread pool, and suppressing nested
-  faer parallelism are the driver's business.
+- **Memory and parallelism policy.** Read-block and chunk size, the thread pool, and
+  suppressing nested faer parallelism are the driver's business.
 - **Cost measurement.** A counting global allocator (`mem.rs`) captures peak heap across
   fit and across a single encode; per-query latencies become avg/p50/p90/p99.
 

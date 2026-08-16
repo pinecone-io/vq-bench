@@ -86,6 +86,22 @@ vqb eval   <config> <raw>      # recompute metrics directly from a prior run's .
 vqb merge  <a> <b>             # combine JSON results files
 ```
 
+## Streaming a dataset larger than memory
+
+By default every command loads the base vectors whole, so a dataset has to fit in RAM. `--stream` reads them from disk a block at a time instead, and peak memory then tracks `--block-mb` (default 256) rather than the dataset size:
+
+```bash
+vqb data get <name> -l 100 --stream   # recompute candidates without loading the base
+vqb encode <config> --stream          # fit + encode a base larger than RAM
+vqb run    <config> --stream          # ... and score it too
+```
+
+A streamed `run` writes each method's codes to `results/codes/` and scores them from there, so the code set stays off the heap as well. The codes are the same either way, and a store written by one mode is reusable by the other. (Bit-for-bit, with one caveat: a quantizer whose `encode` runs a batched matmul — `e_rabitq` does — can differ in a handful of codes, because the matmul's accumulation order depends on the batch shape and `--block-mb` sets that shape. It is a rounding difference, not a different encoding.) Lowering `--block-mb` cuts peak memory further at no cost in speed.
+
+`--stream` requires `n_fit` and `n_reconstruct` in the config, since both otherwise default to every base row — exactly what a streamed run must not hold. `vqb run <config> --dry-run --stream` reports this before reading anything.
+
+Two consequences worth knowing: `vqb data get --stream` builds the new file beside the old one, so it needs room for a second copy of the dataset on disk; and `encode_memory` counts the read block, so a streamed run's figure is not comparable with a resident one's.
+
 ## Viewing the results
 
 After the run completes, use `vqb view <results.json>` to open a standalone HTML visualization.

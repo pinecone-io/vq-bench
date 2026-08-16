@@ -24,6 +24,10 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hdf5 = { package = "hdf5-metno", version = "0.12", optional = true }
+# Raw H5Dread/H5Dwrite for row-block I/O (src/bin/vqb/h5.rs). Same `^0.12` requirement
+# hdf5-metno itself declares, so both resolve to one copy of the linked library.
+hdf5-sys = { package = "hdf5-metno-sys", version = "0.12", optional = true }
 
 [features]
 default = ["hdf5"]
+hdf5 = ["dep:hdf5", "dep:hdf5-sys"]

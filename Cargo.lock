@@ -1942,6 +1942,7 @@ dependencies = [
  "clap",
  "faer",
  "hdf5-metno",
+ "hdf5-metno-sys",
  "linfa",
  "linfa-clustering",
  "ndarray",
