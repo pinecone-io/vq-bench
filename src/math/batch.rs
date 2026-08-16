@@ -22,7 +22,7 @@ pub fn row_minmax(x: ArrayView2<f32>) -> (Array1<f32>, Array1<f32>) {
 /// Second moment of the rows of an `(n × d)` batch: `X^T X / n`. Symmetric and positive
 /// semi-definite, `(d × d)`. Centered input makes this the covariance.
 pub fn second_moment(x: ArrayView2<f32>) -> Array2<f32> {
-    super::linalg::matmul(x.t(), x.view()) / x.nrows() as f32
+    super::linalg::gram(x) / x.nrows() as f32
 }
 
 /// Elementwise reciprocal, guarding zero: `0.0` stays `0.0` (never `inf`/`NaN`).

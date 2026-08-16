@@ -23,6 +23,15 @@ pub fn matmul(a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
     from_faer(c.as_ref())
 }
 
+/// Gram matrix `a^T · a`, `(cols × cols)`.
+pub fn gram(a: ArrayView2<f32>) -> Array2<f32> {
+    let a = a.as_standard_layout();
+    let fa = as_faer(a.as_slice().unwrap(), a.nrows(), a.ncols());
+    // Transpose inside faer, which reads any stride; `matmul(a.t(), a)` would copy `a`.
+    let c: Mat<f32> = fa.transpose() * fa;
+    from_faer(c.as_ref())
+}
+
 /// Orthogonal factor `Q` of the QR decomposition of `a`.
 pub fn qr_q(a: ArrayView2<f32>) -> Array2<f32> {
     let a = a.as_standard_layout();
@@ -77,6 +86,13 @@ mod tests {
         let b = array![[1., 0.], [0., 1.], [1., 1.]];
         let c = matmul(a.view(), b.view());
         assert_eq!(c, array![[4., 5.], [10., 11.]]);
+    }
+
+    /// `gram` skips the transpose copy `matmul` would make, so it must still agree with it.
+    #[test]
+    fn gram_matches_matmul_of_the_transpose() {
+        let a = array![[1., 2., 3.], [4., 5., 6.]];
+        assert_eq!(gram(a.view()), matmul(a.t(), a.view()));
     }
 
     /// An indefinite symmetric matrix: descending eigenvalues, orthonormal eigenvectors,
