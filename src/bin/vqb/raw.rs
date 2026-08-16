@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use crate::results::Timing;
 
 const MAGIC: &[u8; 4] = b"VQBR";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 pub struct RawData {
     pub meta: RawMeta,
@@ -53,6 +53,8 @@ pub struct RawMethod {
     pub bits_per_dim: f64,
     pub model_bits_per_dim: f64,
     pub code_bits_per_dim: f64,
+    pub fit_s: f64,
+    pub fit_peak_bytes: u64,
     pub encode_s: f64,
     pub encode_peak_bytes: u64,
     pub score_us: Timing,
@@ -168,6 +170,8 @@ fn write_method(w: &mut Writer, m: &RawMethod) {
     w.f64(m.bits_per_dim);
     w.f64(m.model_bits_per_dim);
     w.f64(m.code_bits_per_dim);
+    w.f64(m.fit_s);
+    w.u64(m.fit_peak_bytes);
     w.f64(m.encode_s);
     w.u64(m.encode_peak_bytes);
     w.timing(&m.score_us);
@@ -338,6 +342,8 @@ pub fn from_bytes(bytes: &[u8]) -> Result<RawData> {
                 bits_per_dim: r.f64()?,
                 model_bits_per_dim: r.f64()?,
                 code_bits_per_dim: r.f64()?,
+                fit_s: r.f64()?,
+                fit_peak_bytes: r.u64()?,
                 encode_s: r.f64()?,
                 encode_peak_bytes: r.u64()?,
                 score_us: r.timing()?,
@@ -414,6 +420,8 @@ mod tests {
                     bits_per_dim: 4.0,
                     model_bits_per_dim: 0.01,
                     code_bits_per_dim: 3.99,
+                    fit_s: 0.25,
+                    fit_peak_bytes: 2048,
                     encode_s: 0.5,
                     encode_peak_bytes: 4096,
                     score_us: Timing {
@@ -453,6 +461,8 @@ mod tests {
         assert_eq!(d.true_scores, vec![vec![1.0, 0.5], vec![0.2, 0.9]]);
         let m = &d.methods[0];
         assert_eq!(m.label, "minmax[bits=4]");
+        assert_eq!(m.fit_s, 0.25);
+        assert_eq!(m.fit_peak_bytes, 2048);
         assert_eq!(m.encode_peak_bytes, 4096);
         assert_eq!(m.recon_us, Some(0.7));
         assert_eq!(m.approx_scores[1], vec![0.1, 0.8]);

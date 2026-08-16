@@ -327,7 +327,9 @@ const FIELDS = {
   model_bits:{group:"Size & memory", label:"model bits / dim",       log:false, get:r=>r.model_bits, d3:".3f"},
   code_bits: {group:"Size & memory", label:"code bits / dim",        log:false, get:r=>r.code_bits,  d3:".3f"},
   mem:      {group:"Size & memory", label:"peak memory (MB)",        log:false, get:r=>r.mem,       d3:".2f"},
+  fit_mem:  {group:"Size & memory", label:"fit memory (MB)",         log:false, get:r=>r.fit_mem,   d3:".2f"},
   enc_mem:  {group:"Size & memory", label:"encode memory (MB)",      log:false, get:r=>r.enc_mem,   d3:".2f"},
+  fit_s:    {group:"Time",          label:"fit time (s)",            log:false, get:r=>r.fit_s,     d3:".3f"},
   enc_s:    {group:"Time",          label:"encode time (s)",         log:false, get:r=>r.enc_s,     d3:".3f"},
   score_avg:{group:"Time",          label:"scoring avg (µs)",        log:false, get:r=>r.score_avg, d3:".2f"},
   score_p50:{group:"Time",          label:"scoring p50 (µs)",        log:false, get:r=>r.score_p50, d3:".2f"},
@@ -344,7 +346,7 @@ const FIELDS = {
   recon:    {group:"Quality",       label:"reconstruction MSE",      log:true,  get:r=>r.recon,     d3:".2e"},
   recon_bias:{group:"Quality",      label:"reconstruction bias",     log:true,  get:r=>r.recon_bias,d3:".2e"},
 };
-const FIELD_ORDER = ["bits","model_bits","code_bits","mem","enc_mem","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","exp_sos","mse","bias","kl","l1","recon","recon_bias"];
+const FIELD_ORDER = ["bits","model_bits","code_bits","mem","fit_mem","enc_mem","fit_s","enc_s","score_avg","score_p50","score_p90","score_p99","recon_us","recall","sos","exp_sos","mse","bias","kl","l1","recon","recon_bias"];
 const GROUP_ORDER = ["Size & memory","Time","Quality"];
 
 function family(label){ const p=label.split(/\s+/); return p.length?p[0]:label; }
@@ -374,7 +376,9 @@ function parseDataset(block, meta){
       model_bits: d.model_bits_per_dim ?? null,
       code_bits:  d.code_bits_per_dim ?? null,
       mem:     d.peak_bytes        != null ? d.peak_bytes/1e6        : null,
+      fit_mem: d.fit_peak_bytes    != null ? d.fit_peak_bytes/1e6    : null,
       enc_mem: d.encode_peak_bytes != null ? d.encode_peak_bytes/1e6 : null,
+      fit_s:   d.fit_s ?? null,
       enc_s:   d.encode_s ?? null,
       score_avg: su.avg ?? null, score_p50: su.p50 ?? null,
       score_p90: su.p90 ?? null, score_p99: su.p99 ?? null,
@@ -756,7 +760,9 @@ function applyAllVisibility(){
 // ── Table tab ─────────────────────────────────────────────────────────────────
 const TABLE_METRICS = [
   ["mem",      "peak mem (MB)",   "num2", r=>r.mem],
+  ["fit_mem",  "fit mem (MB)",    "num2", r=>r.fit_mem],
   ["enc_mem",  "encode mem (MB)", "num2", r=>r.enc_mem],
+  ["fit_s",    "fit (s)",         "num3", r=>r.fit_s],
   ["enc_s",    "encode (s)",      "num3", r=>r.enc_s],
   ["score_p50","score p50 (µs)",  "num2", r=>r.score_p50],
   ["score_p90","score p90 (µs)",  "num2", r=>r.score_p90],

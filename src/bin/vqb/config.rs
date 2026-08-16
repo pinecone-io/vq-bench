@@ -114,6 +114,8 @@ pub const RESOURCE_METRICS: &[(&str, &str)] = &[
     ("bits_per_dim", "total encoded size, bits per dimension"),
     ("model_bits_per_dim", "shared-model size, bits per dimension"),
     ("code_bits_per_dim", "per-vector code size, bits per dimension"),
+    ("fit_time", "wall-clock time to fit the model (seconds)"),
+    ("fit_memory", "peak additional heap during fit (bytes)"),
     ("encode_time", "wall-clock time to encode the base (seconds)"),
     ("encode_memory", "peak additional heap during encode (bytes)"),
     (

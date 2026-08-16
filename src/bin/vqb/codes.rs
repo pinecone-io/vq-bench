@@ -5,7 +5,7 @@
 //! ```text
 //! magic "VQCS" 4 | version 4 | seed 8 | n_base 8 | dim 8 | n_fit 8 | n_calib 8   (identity, 48 B)
 //! width 8 | encode_s 8 | encode_peak_bytes 8                                     (patched by finish, @48)
-//! threads 8                                                                      (encode worker count, @72)
+//! threads 8 | fit_s 8 | fit_peak_bytes 8                                         (known at create, @72)
 //! label_len u32 | label bytes | model_len u32 | model bytes
 //! --- data (n_base × width bytes of codes, row order) ---
 //! ```
@@ -28,13 +28,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 const MAGIC: &[u8; 4] = b"VQCS";
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
-/// Size of the fixed-length header span (identity + the patched width/stats +
-/// `threads`), i.e. everything before the length-prefixed `label` and `model`.
-/// identity 48 (magic 4 + version 4 + seed 8 + n_base 8 + dim 8 + n_fit 8 + n_calib 8)
-/// + width 8 + encode_s 8 + encode_peak 8 + threads 8.
-const FIXED_SPAN: usize = 80;
+/// Size of the fixed-length header span (identity, the patched width/encode stats,
+/// `threads`, and the fit stats), i.e. everything before the length-prefixed `label`
+/// and `model`. identity 48 (magic 4 + version 4 + seed 8 + n_base 8 + dim 8 +
+/// n_fit 8 + n_calib 8) + width 8 + encode_s 8 + encode_peak 8 + threads 8 +
+/// fit_s 8 + fit_peak 8.
+const FIXED_SPAN: usize = 96;
 /// Byte offset of the `width`/`encode_s`/`encode_peak_bytes` triple, patched by
 /// `finish` once the width and encode stats are known.
 const PATCH_OFFSET: u64 = 48;
@@ -100,18 +101,15 @@ pub struct CodeWriter {
 
 impl CodeWriter {
     /// Create the file and write the header (width/encode stats left as zero
-    /// placeholders, filled in by `finish`). `n_fit`/`n_calib` are the resolved
-    /// row counts used to fit the model; `threads` is the encode worker count in
-    /// effect (metadata only — not part of the code-determining identity).
-    #[allow(clippy::too_many_arguments)]
+    /// placeholders, filled in by `finish`). `threads` is the encode worker count
+    /// in effect and `fit_s`/`fit_peak_bytes` the cost of the `fit` that produced
+    /// `model` — metadata only, not part of the code-determining identity.
     pub fn create(
         path: &Path,
-        seed: u64,
-        dim: usize,
-        n_base: usize,
-        n_fit: usize,
-        n_calib: usize,
+        id: &Identity,
         threads: usize,
+        fit_s: f64,
+        fit_peak_bytes: u64,
         label: &str,
         model: &[u8],
     ) -> Result<Self> {
@@ -122,15 +120,17 @@ impl CodeWriter {
         let mut header = Vec::with_capacity(FIXED_SPAN + label.len() + model.len());
         header.extend_from_slice(MAGIC);
         header.extend_from_slice(&VERSION.to_le_bytes());
-        header.extend_from_slice(&seed.to_le_bytes());
-        header.extend_from_slice(&(n_base as u64).to_le_bytes());
-        header.extend_from_slice(&(dim as u64).to_le_bytes());
-        header.extend_from_slice(&(n_fit as u64).to_le_bytes());
-        header.extend_from_slice(&(n_calib as u64).to_le_bytes());
+        header.extend_from_slice(&id.seed.to_le_bytes());
+        header.extend_from_slice(&(id.n_base as u64).to_le_bytes());
+        header.extend_from_slice(&(id.dim as u64).to_le_bytes());
+        header.extend_from_slice(&(id.n_fit as u64).to_le_bytes());
+        header.extend_from_slice(&(id.n_calib as u64).to_le_bytes());
         header.extend_from_slice(&0u64.to_le_bytes()); // width (patched)
         header.extend_from_slice(&0f64.to_le_bytes()); // encode_s (patched)
         header.extend_from_slice(&0u64.to_le_bytes()); // encode_peak_bytes (patched)
         header.extend_from_slice(&(threads as u64).to_le_bytes()); // threads (known now)
+        header.extend_from_slice(&fit_s.to_le_bytes()); // fit_s (known now)
+        header.extend_from_slice(&fit_peak_bytes.to_le_bytes()); // fit_peak_bytes (known now)
         header.extend_from_slice(&(label.len() as u32).to_le_bytes());
         header.extend_from_slice(label.as_bytes());
         header.extend_from_slice(&(model.len() as u32).to_le_bytes());
@@ -145,7 +145,7 @@ impl CodeWriter {
             w,
             tmp_path,
             final_path: path.to_path_buf(),
-            n_base,
+            n_base: id.n_base,
             width: None,
             count: 0,
         })
@@ -233,6 +233,8 @@ pub struct CodeStore {
     encode_s: f64,
     encode_peak_bytes: u64,
     threads: usize,
+    fit_s: f64,
+    fit_peak_bytes: u64,
 }
 
 impl CodeStore {
@@ -258,6 +260,8 @@ impl CodeStore {
         let encode_s = f64::from_le_bytes(h[56..64].try_into().unwrap());
         let encode_peak_bytes = u64::from_le_bytes(h[64..72].try_into().unwrap());
         let threads = u64::from_le_bytes(h[72..80].try_into().unwrap()) as usize;
+        let fit_s = f64::from_le_bytes(h[80..88].try_into().unwrap());
+        let fit_peak_bytes = u64::from_le_bytes(h[88..96].try_into().unwrap());
 
         let label = read_len_prefixed(&mut file, "label")?;
         let label = String::from_utf8(label).context("label is not utf-8")?;
@@ -298,6 +302,8 @@ impl CodeStore {
             encode_s,
             encode_peak_bytes,
             threads,
+            fit_s,
+            fit_peak_bytes,
         })
     }
 
@@ -344,6 +350,12 @@ impl CodeStore {
     pub fn threads(&self) -> usize {
         self.threads
     }
+    pub fn fit_s(&self) -> f64 {
+        self.fit_s
+    }
+    pub fn fit_peak_bytes(&self) -> u64 {
+        self.fit_peak_bytes
+    }
 }
 
 /// Read a `u32`-length-prefixed byte block from `file` at its current cursor.
@@ -365,21 +377,23 @@ mod tests {
         std::env::temp_dir().join(format!("vqb_codes_test_{name}.codes"))
     }
 
+    /// A throwaway identity for the tests that only exercise writer/reader mechanics.
+    fn stub_id(dim: usize, n_base: usize) -> Identity {
+        Identity {
+            seed: 1,
+            n_base,
+            dim,
+            n_fit: n_base,
+            n_calib: 0,
+        }
+    }
+
     #[test]
     fn round_trips_codes_and_header() {
         let path = tmp("round_trip");
         let codes: Vec<Vec<u8>> = (0..10u8).map(|i| vec![i, i.wrapping_add(1), 42]).collect();
         let model = vec![7u8, 8, 9];
 
-        let mut w =
-            CodeWriter::create(&path, 123, 4, codes.len(), 8, 5, 6, "MinMax (b=2)", &model).unwrap();
-        w.push_chunk(&codes[..4]).unwrap();
-        w.push_chunk(&codes[4..]).unwrap();
-        let (width, code_bytes) = w.finish(1.5, 4096).unwrap();
-        assert_eq!(width, 3);
-        assert_eq!(code_bytes, 30);
-
-        let store = CodeStore::open(&path).unwrap();
         let id = Identity {
             seed: 123,
             n_base: 10,
@@ -387,6 +401,14 @@ mod tests {
             n_fit: 8,
             n_calib: 5,
         };
+        let mut w = CodeWriter::create(&path, &id, 6, 0.25, 2048, "MinMax (b=2)", &model).unwrap();
+        w.push_chunk(&codes[..4]).unwrap();
+        w.push_chunk(&codes[4..]).unwrap();
+        let (width, code_bytes) = w.finish(1.5, 4096).unwrap();
+        assert_eq!(width, 3);
+        assert_eq!(code_bytes, 30);
+
+        let store = CodeStore::open(&path).unwrap();
         assert!(store.matches(&id, "MinMax (b=2)"));
         // Any component of the identity differing rejects the cache.
         assert!(!store.matches(&Identity { dim: 8, ..id }, "MinMax (b=2)"));
@@ -399,6 +421,8 @@ mod tests {
         assert_eq!(store.encode_s(), 1.5);
         assert_eq!(store.encode_peak_bytes(), 4096);
         assert_eq!(store.threads(), 6);
+        assert_eq!(store.fit_s(), 0.25);
+        assert_eq!(store.fit_peak_bytes(), 2048);
         assert_eq!(store.code_bytes(), 30);
         // Random access by index round-trips every row.
         for i in [0usize, 3, 9, 1] {
@@ -423,7 +447,7 @@ mod tests {
         assert!(id.stored(ds, label).is_none(), "no file yet");
 
         let path = path_for(ds, label);
-        let mut w = CodeWriter::create(&path, 5, 2, 3, 3, 0, 1, label, &[]).unwrap();
+        let mut w = CodeWriter::create(&path, &id, 1, 0.0, 0, label, &[]).unwrap();
         w.push_chunk(&[vec![1, 2], vec![3, 4], vec![5, 6]]).unwrap();
         w.finish(0.0, 0).unwrap();
 
@@ -439,7 +463,7 @@ mod tests {
     #[test]
     fn rejects_nonuniform_width() {
         let path = tmp("nonuniform");
-        let mut w = CodeWriter::create(&path, 1, 2, 2, 2, 0, 1, "stub", &[]).unwrap();
+        let mut w = CodeWriter::create(&path, &stub_id(2, 2), 1, 0.0, 0, "stub", &[]).unwrap();
         let err = w.push_chunk(&[vec![1, 2], vec![3]]).unwrap_err();
         assert!(err.to_string().contains("fixed code width"));
     }
@@ -449,7 +473,7 @@ mod tests {
         let path = tmp("interrupted");
         std::fs::remove_file(&path).ok();
         // Encode partially, then drop the writer without `finish` (as a kill would).
-        let mut w = CodeWriter::create(&path, 1, 3, 4, 4, 0, 1, "stub", &[]).unwrap();
+        let mut w = CodeWriter::create(&path, &stub_id(3, 4), 1, 0.0, 0, "stub", &[]).unwrap();
         w.push_chunk(&[vec![1, 2, 3], vec![4, 5, 6]]).unwrap();
         drop(w);
         // The destination `run` reads was never created, and `Drop` reclaimed the
@@ -463,7 +487,8 @@ mod tests {
     fn open_rejects_truncated_data() {
         let path = tmp("truncated");
         let codes: Vec<Vec<u8>> = (0..4u8).map(|i| vec![i, i, i]).collect();
-        let mut w = CodeWriter::create(&path, 1, 3, codes.len(), 4, 0, 1, "stub", &[]).unwrap();
+        let mut w =
+            CodeWriter::create(&path, &stub_id(3, codes.len()), 1, 0.0, 0, "stub", &[]).unwrap();
         w.push_chunk(&codes).unwrap();
         w.finish(0.0, 0).unwrap();
         // A clean file opens; lopping a byte off the data region makes it fail.
@@ -480,7 +505,7 @@ mod tests {
     #[test]
     fn open_rejects_overflowing_header_without_panic() {
         let path = tmp("overflow");
-        let mut w = CodeWriter::create(&path, 1, 3, 1, 1, 0, 1, "stub", &[]).unwrap();
+        let mut w = CodeWriter::create(&path, &stub_id(3, 1), 1, 0.0, 0, "stub", &[]).unwrap();
         w.push_chunk(&[vec![1, 2, 3]]).unwrap();
         w.finish(0.0, 0).unwrap();
         // Poison the header's `n` and `width` so `n * width` would overflow a u64.

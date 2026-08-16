@@ -58,6 +58,8 @@ pub fn method_result(
         bits_per_dim: sig6(m.bits_per_dim),
         model_bits_per_dim: sig6(m.model_bits_per_dim),
         code_bits_per_dim: sig6(m.code_bits_per_dim),
+        fit_s: sig6(m.fit_s),
+        fit_peak_bytes: m.fit_peak_bytes,
         encode_s: sig6(m.encode_s),
         encode_peak_bytes: m.encode_peak_bytes,
         encode_peak_bytes_per_vec: sig6(m.encode_peak_bytes as f64 / d.n_base as f64),

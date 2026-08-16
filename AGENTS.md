@@ -54,7 +54,8 @@ Artifacts land under `results/`: `<exp>.json` (aggregated), `raw/<exp>.raw` (the
 `vqb eval` replays), and `codes/` (per-method code stores). A code store (`codes.rs`) is
 a fixed-width file whose header records everything determining the codes — dataset,
 method label, `seed`, `n_base`, `n_fit`, `n_calib` — so `run` can safely reuse a prior
-`encode`'s output, and refuses when the identity doesn't match. `encode` checks the same
+`encode`'s output, and refuses when the identity doesn't match. The header also carries
+the fit and encode cost, so a reused store reports them rather than zeros. `encode` checks the same
 identity to skip work it has already done, cheaply enough (from the dataset's shapes)
 that an all-cached dataset is never even loaded. `--fresh` ignores stores entirely, on
 both commands.
@@ -65,8 +66,8 @@ Three things the **harness** owns, deliberately kept out of quantizers:
   produced, so a quantizer cannot misreport its own footprint.
 - **Memory and parallelism policy.** Chunk size, the thread pool, and suppressing nested
   faer parallelism are the driver's business.
-- **Cost measurement.** A counting global allocator (`mem.rs`) captures peak heap during
-  a single encode; per-query latencies become avg/p50/p90/p99.
+- **Cost measurement.** A counting global allocator (`mem.rs`) captures peak heap across
+  fit and across a single encode; per-query latencies become avg/p50/p90/p99.
 
 The compute path is behind the default `hdf5` feature; `show`, `data list`, and
 `run --dry-run` still build without the system library.

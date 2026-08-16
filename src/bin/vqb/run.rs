@@ -268,16 +268,17 @@ fn table_header(
 ) {
     eprintln!("  dim {dim} · base {n_base} · fit {n_fit} · eval {n_eval} · n_cand {n_candidates}");
     eprintln!(
-        "  {:<22}{:>10}{:>12}{:>13}{:>13}{:>9}{:>10}",
+        "  {:<22}{:>10}{:>12}{:>13}{:>9}{:>10}{:>9}{:>10}",
         "method",
         "bits/dim",
         format!("recall@{dk}"),
-        "mse_score",
         "mse_recon",
+        "fit(s)",
+        "fit(MB)",
         "enc(s)",
         "enc(MB)"
     );
-    eprintln!("  {}", "─".repeat(89));
+    eprintln!("  {}", "─".repeat(95));
 }
 
 /// The metric cells for one finished method (the label cell is printed first).
@@ -299,22 +300,19 @@ fn row_tail(
     } else {
         dash()
     };
-    let mse_s = if want("mse_score") {
-        sci(bench::score_mse_bias(true_scores, &rm.approx_scores).0)
-    } else {
-        dash()
-    };
     let mse_r = match (&rm.recons, want("mse_recon")) {
         (Some(r), true) => sci(bench::recon_mse(references, r)),
         _ => dash(),
     };
+    let fit_mb = rm.fit_peak_bytes as f64 / 1e6;
     let enc_mb = rm.encode_peak_bytes as f64 / 1e6;
     format!(
-        "{:>10}{:>12}{:>13}{:>13}{:>9.1}{:>10.1}",
+        "{:>10}{:>12}{:>13}{:>9.1}{:>10.1}{:>9.1}{:>10.1}",
         fixed(rm.bits_per_dim),
         recall,
-        mse_s,
         mse_r,
+        rm.fit_s,
+        fit_mb,
         rm.encode_s,
         enc_mb
     )
@@ -333,8 +331,15 @@ fn run_method(
     recon_idx: &[usize],
 ) -> RawMethod {
     let (n_base, dim) = base.dim();
+    let baseline = mem::current();
+    mem::reset_peak();
+    let t = Instant::now();
     let model = q.fit(fit_base, calib.map(|c| c.view()));
+    let fit_s = t.elapsed().as_secs_f64();
+    let fit_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
 
+    // Baseline taken after fit, so the retained model counts as encode's ground
+    // rather than as encode's growth.
     let baseline = mem::current();
     mem::reset_peak();
     let t = Instant::now();
@@ -350,6 +355,8 @@ fn run_method(
         n_base,
         dim,
         code_bytes,
+        fit_s,
+        fit_peak_bytes,
         encode_s,
         encode_peak_bytes,
         &Codes::Mem(codes),
@@ -373,6 +380,8 @@ fn run_method_cached(
     let n_base = store.len();
     let model = store.model().to_vec();
     let code_bytes = store.code_bytes();
+    let fit_s = store.fit_s();
+    let fit_peak_bytes = store.fit_peak_bytes();
     let encode_s = store.encode_s();
     let encode_peak_bytes = store.encode_peak_bytes();
     score_and_reconstruct(
@@ -382,6 +391,8 @@ fn run_method_cached(
         n_base,
         dim,
         code_bytes,
+        fit_s,
+        fit_peak_bytes,
         encode_s,
         encode_peak_bytes,
         &Codes::Disk(store),
@@ -402,6 +413,8 @@ fn score_and_reconstruct(
     n_base: usize,
     dim: usize,
     code_bytes: usize,
+    fit_s: f64,
+    fit_peak_bytes: u64,
     encode_s: f64,
     encode_peak_bytes: u64,
     codes: &Codes,
@@ -437,6 +450,8 @@ fn score_and_reconstruct(
         bits_per_dim: bench::bits_per_dim(mb + cb, n_base, dim),
         model_bits_per_dim: bench::bits_per_dim(mb, n_base, dim),
         code_bits_per_dim: bench::bits_per_dim(cb, n_base, dim),
+        fit_s,
+        fit_peak_bytes,
         encode_s,
         encode_peak_bytes,
         score_us: timing(latencies),
@@ -790,11 +805,17 @@ fn encode_dataset(
         }
         let q = factory::build(m, cfg.seed, dim)?;
         let fit_base = fit_storage.as_ref().map_or_else(|| db.view(), |f| f.view());
+        let baseline = mem::current();
+        mem::reset_peak();
+        let t = Instant::now();
         let model = q.fit(fit_base, calib.as_ref().map(|c| c.view()));
+        let fit_s = t.elapsed().as_secs_f64();
+        let fit_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
 
-        let mut writer = codes::CodeWriter::create(
-            &path, cfg.seed, dim, n_base, id.n_fit, id.n_calib, threads, &label, &model,
-        )?;
+        let mut writer =
+            codes::CodeWriter::create(&path, &id, threads, fit_s, fit_peak_bytes, &label, &model)?;
+        // Baseline taken after fit, so the retained model counts as encode's ground
+        // rather than as encode's growth.
         let baseline = mem::current();
         mem::reset_peak();
         let t = Instant::now();
@@ -815,7 +836,7 @@ fn encode_dataset(
         let encode_peak_bytes = mem::peak().saturating_sub(baseline) as u64;
         let (width, _) = writer.finish(encode_s, encode_peak_bytes)?;
         eprintln!(
-            "  {label:<22} → {} ({n_base} rows × {width} B, {encode_s:.1}s, {threads} thread(s))",
+            "  {label:<22} → {} ({n_base} rows × {width} B, fit {fit_s:.1}s, enc {encode_s:.1}s, {threads} thread(s))",
             path.display()
         );
     }

@@ -59,6 +59,10 @@ pub struct MethodResult {
     pub bits_per_dim: f64,
     pub model_bits_per_dim: f64,
     pub code_bits_per_dim: f64,
+    /// Wall-clock time to fit the model on the `n_fit` sample (seconds).
+    pub fit_s: f64,
+    /// Peak additional heap during fit (bytes above the pre-fit baseline).
+    pub fit_peak_bytes: u64,
     pub encode_s: f64,
     /// Peak additional heap during encoding (bytes above the pre-encode baseline).
     pub encode_peak_bytes: u64,
