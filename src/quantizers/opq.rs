@@ -1,7 +1,7 @@
 //! `opq`: Optimized Product Quantization — learn a rotation minimizing PQ error,
 //! then PQ (segment split + per-segment k-means) on the rotated data.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde_json::Value;
 
 use super::catalog::{get, get_or, FromParam};
@@ -11,6 +11,11 @@ use crate::{OptimizePq, Params, Pipeline, Primitive, Quantizer};
 
 /// Alternation steps when a config does not say (Ge et al. 2013 use ~15).
 const DEFAULT_ITERS: usize = 15;
+
+/// Most alternation steps a config may ask for. Each one refits every segment codebook,
+/// so a typo'd digit count is hours of compute that `--dry-run` cannot catch: it builds
+/// the pipeline but never fits it.
+const MAX_ITERS: usize = 1000;
 
 /// Where the alternation starts when a config does not say. `Eigen` is what `describe`
 /// advertises and what Ge et al. 2013 report as the best variant; it also makes `opq`
@@ -47,6 +52,10 @@ impl Opq {
     /// `init = Eigen` — then PQ over `section_dim`-column segments with `centroids`
     /// codewords each (distinct seed per segment), composed via [`Pq::pipeline`], which
     /// also validates the params.
+    ///
+    /// Both optional stages may drop out: `init = Identity` with `iters = 0` leaves a
+    /// pipeline identical to `pq`, reported under the OPQ label. Legal, and legible in
+    /// the label the harness prints, but read an "OPQ (iters=0)" row accordingly.
     pub fn pipeline(
         centroids: usize,
         section_dim: usize,
@@ -55,6 +64,7 @@ impl Opq {
         seed: u64,
         dim: usize,
     ) -> Result<Pipeline> {
+        ensure!(iters <= MAX_ITERS, "iters must be in 0..={MAX_ITERS}, got {iters}");
         let pq = Pq::pipeline(centroids, section_dim, seed, dim)?;
         let mut stages: Vec<Box<dyn Primitive>> = Vec::new();
         if let Init::Eigen = init {
@@ -84,7 +94,7 @@ impl Quantizer for Opq {
     }
 
     fn describe() -> &'static str {
-        "Center -> PcaRotate -> BalanceParts(section_dim) -> OptimizePq(iters) -> PQ"
+        "Center -> PcaRotate -> BalanceParts(section_dim) at init=eigen, then OptimizePq(iters) -> PQ"
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
@@ -139,7 +149,8 @@ mod tests {
         assert!(opq(16, 8, 1, 64).is_ok());
     }
 
-    /// `init` takes the two named rotations and nothing else; `iters` is a plain count.
+    /// `init` takes the two named rotations and nothing else; `iters` is a count bounded
+    /// at both ends. `0` is legal and degenerate — see [`Opq::pipeline`].
     #[test]
     fn reads_init_and_iters() {
         let with = |init: &str, iters: u64| {
@@ -153,7 +164,25 @@ mod tests {
         };
         assert!(with("identity", 15).is_ok());
         assert!(with("eigen", 0).is_ok());
+        assert!(with("identity", 0).is_ok()); // degenerate but legal: this is `pq`
         assert!(with("pca", 15).is_err());
+    }
+
+    /// An `iters` a config could plausibly typo is refused when the pipeline is built,
+    /// which is all `run --dry-run` does — not hours later, mid-fit.
+    #[test]
+    fn rejects_an_out_of_range_iters() {
+        let with_iters = |iters: u64| {
+            let p = params(&[
+                ("centroids", json!(16)),
+                ("section_dim", json!(8)),
+                ("iters", json!(iters)),
+            ]);
+            Opq::build(&p, 1, 64)
+        };
+        assert!(with_iters(MAX_ITERS as u64).is_ok());
+        let err = with_iters(MAX_ITERS as u64 + 1).err().unwrap().to_string();
+        assert!(err.contains("iters"), "error must name the param: {err}");
     }
 
     /// The `opq` quantizer with an explicit init and iteration count.
