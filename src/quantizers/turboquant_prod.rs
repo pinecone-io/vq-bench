@@ -1,4 +1,4 @@
-//! `turboquant_prod`: TurboQuant's product variant — the bulk in a (b-1)-bit Gaussian
+//! `turboquant_prod`: center, TurboQuant's product variant — the bulk in a (b-1)-bit Gaussian
 //! codebook, one bit reallocated to a 1-bit QJL of the residual for an unbiased
 //! inner-product estimate.
 
@@ -8,7 +8,7 @@ use super::catalog::{get, get_or};
 use super::qjl::Qjl;
 use super::rotation::Rotation;
 use crate::coding::CodeLayout;
-use crate::{CastNormal, NormalScale, Normalize, Params, Pipeline, Quantizer};
+use crate::{CastNormal, Center, Normalize, NormalScale, Params, Pipeline, Quantizer};
 
 /// Independent seed offset for the residual's QJL rotation.
 const RESIDUAL_ROTATION_SEED: u64 = 0xD15C0;
@@ -19,7 +19,7 @@ const RESIDUAL_ROTATION_SEED: u64 = 0xD15C0;
 pub struct TurboquantProd(pub Pipeline);
 
 impl TurboquantProd {
-    /// `Normalize -> rotate(seed) -> CastNormal(b-1, Plain)`, then a 1-bit QJL of the
+    /// `Center -> Normalize -> rotate(seed) -> CastNormal(b-1, Plain)`, then a 1-bit QJL of the
     /// residual (same rotation kind, its own seed, at the post-rotation width) —
     /// composed via [`Qjl::pipeline`]; a `Pipeline` is a `Primitive`.
     pub fn pipeline(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
@@ -34,6 +34,7 @@ impl TurboquantProd {
         Pipeline::new(
             dim,
             vec![
+                Box::new(Center),
                 Box::new(Normalize),
                 stage,
                 Box::new(CastNormal::new(bits - 1, NormalScale::Plain)),
@@ -57,7 +58,7 @@ impl Quantizer for TurboquantProd {
     }
 
     fn describe() -> &'static str {
-        "Normalize -> Rotate -> CastNormal(b-1, plain) -> QJL"
+        "Center -> Normalize -> Rotate -> CastNormal(b-1, plain) -> QJL"
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {

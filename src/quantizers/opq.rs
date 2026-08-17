@@ -12,6 +12,12 @@ use crate::{OptimizePq, Params, Pipeline, Primitive, Quantizer};
 /// Alternation steps when a config does not say (Ge et al. 2013 use ~15).
 const DEFAULT_ITERS: usize = 15;
 
+/// Where the alternation starts when a config does not say. `Eigen` is what `describe`
+/// advertises and what Ge et al. 2013 report as the best variant; it also makes `opq`
+/// a strict extension of `opq_p` — the same head, plus the alternation — so a comparison
+/// between the two measures the alternation rather than the head.
+const DEFAULT_INIT: Init = Init::Eigen;
+
 /// What the alternation is handed to start from: the raw data, or the parametric
 /// rotation the [`OpqP`] family applies. The alternation is locally optimal, so the two
 /// land in different places — Ge et al. 2013 report the parametric start as the best of
@@ -86,7 +92,7 @@ impl Quantizer for Opq {
             get(p, "centroids")?,
             get(p, "section_dim")?,
             get_or(p, "iters", DEFAULT_ITERS)?,
-            get_or(p, "init", Init::Identity)?,
+            get_or(p, "init", DEFAULT_INIT)?,
             seed,
             dim,
         )?))
@@ -169,6 +175,21 @@ mod tests {
         let identity = recon_error(&opq_with("identity", 15, 4, 5, 32), &v);
         let eigen = recon_error(&opq_with("eigen", 15, 4, 5, 32), &v);
         assert!(eigen < identity, "eigen {eigen} not better than identity {identity}");
+    }
+
+    /// The default init is the parametric head, so a config naming neither `init` nor
+    /// `iters` gets what `describe` advertises. Pinned because the alternative reads as
+    /// a plausible default and silently turns `opq` into a different pipeline from
+    /// `opq_p` rather than an extension of it — which makes the two incomparable.
+    #[test]
+    fn the_default_init_is_the_parametric_head() {
+        let v = correlated(200, 32, 11);
+        let default = opq(16, 8, 1, 32).unwrap();
+        assert_eq!(
+            default.fit(v.view(), None),
+            opq_with("eigen", DEFAULT_ITERS as u64, 8, 1, 32).fit(v.view(), None),
+            "`opq` with no `init` must match `init=eigen`"
+        );
     }
 
     /// With the parametric head and nothing to alternate, `opq` *is* `opq_p` — no

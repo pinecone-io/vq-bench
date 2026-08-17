@@ -1,4 +1,4 @@
-//! `turboquant_mse`: unit-normalize, rotate, then a b-bit Gaussian codebook with the
+//! `turboquant_mse`: center, unit-normalize, rotate, then a b-bit Gaussian codebook with the
 //! plain (S=1) dequant scale (TurboQuant, MSE variant — EDEN's pipeline, plain scale).
 
 use anyhow::{ensure, Result};
@@ -6,14 +6,14 @@ use anyhow::{ensure, Result};
 use super::catalog::{get, get_or};
 use super::rotation::Rotation;
 use crate::coding::CodeLayout;
-use crate::{CastNormal, NormalScale, Normalize, Params, Pipeline, Quantizer};
+use crate::{CastNormal, Center, Normalize, NormalScale, Params, Pipeline, Quantizer};
 
 /// The `turboquant_mse` family. `get`/`get_or` type-check the params; the `b` range
 /// is checked in `build`.
 pub struct TurboquantMse(pub Pipeline);
 
 impl TurboquantMse {
-    /// `Normalize -> rotate(seed) -> CastNormal(b, Plain)` over input dim `dim`.
+    /// `Center -> Normalize -> rotate(seed) -> CastNormal(b, Plain)` over input dim `dim`.
     pub fn pipeline(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(
             (1..=CodeLayout::MAX_BITS).contains(&bits),
@@ -23,6 +23,7 @@ impl TurboquantMse {
         Pipeline::new(
             dim,
             vec![
+                Box::new(Center),
                 Box::new(Normalize),
                 rotation.stage(seed),
                 Box::new(CastNormal::new(bits, NormalScale::Plain)),
@@ -45,7 +46,7 @@ impl Quantizer for TurboquantMse {
     }
 
     fn describe() -> &'static str {
-        "Normalize -> Rotate -> CastNormal(b, plain)"
+        "Center -> Normalize -> Rotate -> CastNormal(b, plain)"
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {

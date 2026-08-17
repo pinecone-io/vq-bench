@@ -1,11 +1,11 @@
-//! `qjl`: unit-normalize, rotate into `b*dim` dimensions, then 1-bit signs — an unbiased
+//! `qjl`: center, unit-normalize, rotate into `b*dim` dimensions, then 1-bit signs — an unbiased
 //! inner-product estimate (CastSign's sqrt(pi/2m) scale corrects the sign estimator's bias).
 
 use anyhow::{ensure, Result};
 
 use super::catalog::get_or;
 use super::rotation::{coded_dim, rotate_to, Rotation};
-use crate::{CastSign, Normalize, Params, Pipeline, Primitive, Quantizer};
+use crate::{CastSign, Center, Normalize, Params, Pipeline, Primitive, Quantizer};
 
 /// The `qjl` family. The projection count `m = b*dim` is QJL's native bit budget;
 /// CastSign scores with the QJL scale sqrt(pi/2m) on the width it is handed, so the
@@ -13,10 +13,10 @@ use crate::{CastSign, Normalize, Params, Pipeline, Primitive, Quantizer};
 pub struct Qjl(pub Pipeline);
 
 impl Qjl {
-    /// `Normalize -> rotate(seed) to m = b*dim dims -> CastSign` over input dim `dim`.
+    /// `Center -> Normalize -> rotate(seed) to m = b*dim dims -> CastSign` over input dim `dim`.
     pub fn pipeline(bits: f32, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(bits.is_finite() && bits > 0.0, "b must be positive, got {bits}");
-        let mut stages: Vec<Box<dyn Primitive>> = vec![Box::new(Normalize)];
+        let mut stages: Vec<Box<dyn Primitive>> = vec![Box::new(Center), Box::new(Normalize)];
         stages.extend(rotate_to(rotation, seed, dim, coded_dim(bits, dim)));
         stages.push(Box::new(CastSign));
         Pipeline::new(dim, stages)
@@ -37,7 +37,7 @@ impl Quantizer for Qjl {
     }
 
     fn describe() -> &'static str {
-        "Normalize -> Rotate to b*dim dims -> CastSign"
+        "Center -> Normalize -> Rotate to b*dim dims -> CastSign"
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {

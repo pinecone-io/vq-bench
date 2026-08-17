@@ -1,5 +1,5 @@
 {
-  "generated": 1786491301,
+  "generated": 1786935434,
   "runs": [
     {
       "name": "aug-2026",
@@ -10,16 +10,20 @@
           "n_base": 1344643
         },
         {
-          "dataset": "coco-nomic-768-normalized",
-          "n_base": 282360
-        },
-        {
           "dataset": "ccnews-nomic-768-normalized",
           "n_base": 495328
         },
         {
-          "dataset": "yahoo-minilm-384-normalized",
-          "n_base": 677305
+          "dataset": "coco-nomic-768-normalized",
+          "n_base": 282360
+        },
+        {
+          "dataset": "hotpotqa-harrier-640-normalized",
+          "n_base": 5233329
+        },
+        {
+          "dataset": "imagenet-clip-512-normalized",
+          "n_base": 1281167
         },
         {
           "dataset": "laion-clip-512-normalized",
@@ -30,42 +34,19 @@
           "n_base": 760757
         },
         {
-          "dataset": "imagenet-clip-512-normalized",
-          "n_base": 1281167
-        },
-        {
           "dataset": "llama-128-ip",
           "n_base": 256921
-        }
-      ],
-      "timestamp": 1786480944
-    },
-    {
-      "name": "july-2026",
-      "path": "july-2026.json",
-      "datasets": [
-        {
-          "dataset": "arxiv-nomic-768-normalized",
-          "n_base": 1344643
         },
         {
-          "dataset": "coco-nomic-768-normalized",
-          "n_base": 282360
-        },
-        {
-          "dataset": "ccnews-nomic-768-normalized",
-          "n_base": 495328
+          "dataset": "msmarco-qwen-1024-normalized",
+          "n_base": 8840823
         },
         {
           "dataset": "yahoo-minilm-384-normalized",
           "n_base": 677305
-        },
-        {
-          "dataset": "laion-clip-512-normalized",
-          "n_base": 1000448
         }
       ],
-      "timestamp": 1785168035
+      "timestamp": 1786731355
     }
   ]
 }

@@ -1,4 +1,4 @@
-//! `eden_mse`: unit-normalize, rotate, then a b-bit Gaussian codebook with the
+//! `eden_mse`: center, unit-normalize, rotate, then a b-bit Gaussian codebook with the
 //! MSE-optimal dequant scale (EDEN).
 
 use anyhow::{ensure, Result};
@@ -6,14 +6,14 @@ use anyhow::{ensure, Result};
 use super::catalog::{get, get_or};
 use super::rotation::Rotation;
 use crate::coding::CodeLayout;
-use crate::{CastNormal, NormalScale, Normalize, Params, Pipeline, Quantizer};
+use crate::{CastNormal, Center, Normalize, NormalScale, Params, Pipeline, Quantizer};
 
 /// The `eden_mse` family. `get`/`get_or` type-check the params; the `b` range is
 /// checked in `build`.
 pub struct EdenMse(pub Pipeline);
 
 impl EdenMse {
-    /// `Normalize -> rotate(seed) -> CastNormal(b, BiasedMse)` over input dim `dim`.
+    /// `Center -> Normalize -> rotate(seed) -> CastNormal(b, BiasedMse)` over input dim `dim`.
     pub fn pipeline(bits: u8, rotation: Rotation, seed: u64, dim: usize) -> Result<Pipeline> {
         ensure!(
             (1..=CodeLayout::MAX_BITS).contains(&bits),
@@ -23,6 +23,7 @@ impl EdenMse {
         Pipeline::new(
             dim,
             vec![
+                Box::new(Center),
                 Box::new(Normalize),
                 rotation.stage(seed),
                 Box::new(CastNormal::new(bits, NormalScale::BiasedMse)),
@@ -45,7 +46,7 @@ impl Quantizer for EdenMse {
     }
 
     fn describe() -> &'static str {
-        "Normalize -> Rotate -> CastNormal(b, MSE)"
+        "Center -> Normalize -> Rotate -> CastNormal(b, MSE)"
     }
 
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {

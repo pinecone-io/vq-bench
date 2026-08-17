@@ -80,6 +80,18 @@ pub const DATASETS: &[Dataset] = &[
         dim: 128,
         source: "VIBE",
     },
+    // The two large sets: 8.8M × 1024 in-distribution, 5.2M × 640 out-of-distribution.
+    // Both are big enough to want `--stream`, and their code stores want `--codes-dir`.
+    Dataset {
+        name: "msmarco-qwen-1024-normalized",
+        dim: 1024,
+        source: "VIBE",
+    },
+    Dataset {
+        name: "hotpotqa-harrier-640-normalized",
+        dim: 640,
+        source: "VIBE",
+    },
 ];
 
 /// Resolve a dataset by name or unique prefix (`arxiv` → `arxiv-nomic-768-…`).

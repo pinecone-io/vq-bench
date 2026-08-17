@@ -237,7 +237,7 @@
         <tr><td><b>attention TV (τ)</b></td><td>TV-distance between the softmax distributions, at temperature τ</td><td>lower</td></tr>
       </tbody>
     </table>
-    <p class="note">We also report size and efficiency metrics (bits per dimension, peak / encode memory, encode / scoring time). All time and memory statistics were measured on an Apple M2 Pro with 16GB RAM using 6 threads.</p>
+    <p class="note">We also report size and efficiency metrics (bits per dimension, peak / encode memory, encode / scoring time). All time and memory statistics were measured on an Intel Xeon Platinum 8481C (44 cores, 176 GB RAM) using 40 threads.</p>
   </details>
   <p style="margin-top:16px;padding-top:12px"><a href="https://github.com/pinecone-io/vq-bench" target="_blank" rel="noopener">VQ-bench</a> is actively maintained by <a href="https://scholar.google.com/citations?user=0IkkBzQAAAAJ" target="_blank" rel="noopener">Amir Ingber</a>, <a href="https://edoliberty.com/" target="_blank" rel="noopener">Edo Liberty</a> (<a href="https://pinecone.io/" target="_blank" rel="noopener">Pinecone</a>), and <a href="https://apadaki.github.io/" target="_blank" rel="noopener">Ashwin Padaki</a> (UPenn).</p>
 </section>
@@ -299,16 +299,19 @@
 // Stable color per family (family = first whitespace token of the label).
 const COLORS = {
   // RaBitQ family — oranges
-  "RaBitQ":"#e6550d", "E-RaBitQ":"#fdae6b",
+  "RaBitQ":"#ff8c00", "E-RaBitQ":"#ffc286",
   // EDEN family — greens
   "EDEN-MSE":"#238b45", "EDEN-prod":"#74c476",
   // TurboQuant family — purples
-  "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#9e9ac8",
-  // product-quantization & learned-rotation family — blues
-  "PQ":"#08306b", "ITQ":"#3182bd", "ITQ-asym":"#6baed6", "OPQ":"#08519c", "OPQ-par":"#4292c6",
+  "TurboQuant-MSE":"#6a51a3", "TurboQuant-prod":"#8f7fd4",
+  // learned-rotation family — blues
+  "ITQ":"#3182bd", "ITQ-asym":"#6baed6",
+  // product-quantization family — reds (its own hue: sharing the blues left five
+  // series separated by lightness alone, at OKLab dE 4.9 across the worst pair)
+  "PQ":"#7f0000", "OPQ":"#c9182b", "OPQ-par":"#f4685f",
   // singletons — distinct hues
   "SimHash":"#008b8b", // dark teal
-  "QJL":"#bcbd22",     // olive
+  "QJL":"#8c8c00",     // dark olive (clears RaBitQ's orange under protanopia)
   "NF4":"#8c564b",     // brown
   "KIVI":"#fb9a99",    // salmon
   "GEAR":"#7f7f7f",    // gray
@@ -923,7 +926,8 @@ let CURRENT_RUN = null;
 // the dataset name. Returns {html, text} — html has the name bold and the
 // counts muted; text is a tag-free version for document.title.
 const DS_NAMES = {arxiv:"ArXiv", ccnews:"CCNews", yahoo:"Yahoo", coco:"COCO", laion:"LAION",
-                  landmark:"Landmark", imagenet:"ImageNet", llama:"Llama"};
+                  landmark:"Landmark", imagenet:"ImageNet", llama:"Llama",
+                  msmarco:"MS MARCO", hotpotqa:"HotpotQA"};
 function dsName(dataset){
   const id = String(dataset || "").split("-")[0];
   return DS_NAMES[id] || (id ? id[0].toUpperCase()+id.slice(1) : dataset);
@@ -985,16 +989,16 @@ const REFS = [
   {n:"EDEN-MSE",        c:"#238b45", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
   {n:"EDEN-prod",       c:"#74c476", y:2022, t:"EDEN: Communication-Efficient and Robust Distributed Mean Estimation for Federated Learning", u:"https://arxiv.org/abs/2108.08842"},
   {n:"TurboQuant-MSE",  c:"#6a51a3", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
-  {n:"TurboQuant-prod", c:"#9e9ac8", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
-  {n:"RaBitQ",          c:"#e6550d", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2405.12497"},
-  {n:"E-RaBitQ",        c:"#fdae6b", y:2024, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2409.09913"},
+  {n:"TurboQuant-prod", c:"#8f7fd4", y:2025, t:"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate", u:"https://arxiv.org/abs/2504.19874"},
+  {n:"RaBitQ",          c:"#ff8c00", y:2024, t:"RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2405.12497"},
+  {n:"E-RaBitQ",        c:"#ffc286", y:2024, t:"Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search", u:"https://arxiv.org/abs/2409.09913"},
   {n:"SimHash",         c:"#008b8b", y:2002, t:"Similarity Estimation Techniques from Rounding Algorithms", u:"https://doi.org/10.1145/509907.509965"},
-  {n:"QJL",             c:"#bcbd22", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
+  {n:"QJL",             c:"#8c8c00", y:2024, t:"QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead", u:"https://arxiv.org/abs/2406.03482"},
   {n:"ITQ",             c:"#3182bd", y:2013, t:"Iterative Quantization: A Procrustean Approach to Learning Binary Codes for Large-Scale Image Retrieval", u:"https://doi.org/10.1109/TPAMI.2012.193"},
   {n:"ITQ-asym",        c:"#6baed6", y:2014, t:"Asymmetric Distances for Binary Embeddings", u:"https://doi.org/10.1109/TPAMI.2013.101"},
-  {n:"PQ",              c:"#08306b", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
-  {n:"OPQ",             c:"#08519c", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
-  {n:"OPQ-par",         c:"#4292c6", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
+  {n:"PQ",              c:"#7f0000", y:2011, t:"Product Quantization for Nearest Neighbor Search", u:"https://doi.org/10.1109/TPAMI.2010.57"},
+  {n:"OPQ",             c:"#c9182b", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
+  {n:"OPQ-par",         c:"#f4685f", y:2013, t:"Optimized Product Quantization for Approximate Nearest Neighbor Search", u:"https://doi.org/10.1109/CVPR.2013.379"},
 ];
 (function renderRefs(){
   const tb = document.getElementById("refbody");
