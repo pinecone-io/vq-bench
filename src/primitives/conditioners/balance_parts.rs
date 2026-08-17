@@ -1,4 +1,4 @@
-//! BALANCE_PARTS: reorders dimensions so every part carries the same variance product
+//! BALANCE_PARTS: reorders dimensions so equal-width parts carry the same variance product
 //! -
 //! Fit: deal the dimensions, largest variance first, into `section_dim`-wide parts
 //! Model: the dealt order, one source dimension per output dimension
@@ -9,6 +9,9 @@
 //!
 //! A product quantizer's distortion bound is minimized when its parts hold equal
 //! variance products (Ge et al. 2013), so this is the deal a downstream splitter needs.
+//! The deal equalizes variance *shifted* up from the smallest (see `balanced_order`), so
+//! the products match across parts of equal width; when `dim` does not divide evenly the
+//! short trailing part carries a different one.
 
 use ndarray::{Array2, ArrayView1, ArrayView2, Axis};
 
@@ -37,8 +40,8 @@ impl BalanceParts {
     }
 }
 
-/// Deal dimensions into parts of the given widths so their log-variance sums match:
-/// largest variance first, each to the lightest part that still has room.
+/// Deal dimensions into parts of the given widths so their shifted log-variance sums
+/// match: largest variance first, each to the lightest part that still has room.
 ///
 /// Weights are measured up from the smallest variance, which makes the deal
 /// scale-invariant. Comparing raw variance products across parts holding different counts
@@ -64,9 +67,32 @@ pub(crate) fn balanced_order(variances: ArrayView1<f32>, widths: &[usize]) -> Ve
     parts.concat()
 }
 
+/// Permute columns in one row-major pass: `out[.., j] = m[.., order[j]]`. `select` over
+/// `Axis(1)` reads a strided subview per column instead, which on a row-major batch is
+/// about one cache miss per element.
+fn gather(m: ArrayView2<f32>, order: &[usize]) -> Array2<f32> {
+    let mut out = Array2::zeros((m.nrows(), order.len()));
+    for (from, mut to) in m.rows().into_iter().zip(out.rows_mut()) {
+        for (j, &source) in order.iter().enumerate() {
+            to[j] = from[source];
+        }
+    }
+    out
+}
+
+/// The deal read backwards -- output dimension per source dimension -- so undoing it is
+/// the same `gather` rather than a second idiom.
+fn inverse(order: &[usize]) -> Vec<usize> {
+    let mut back = vec![0; order.len()];
+    for (dealt, &source) in order.iter().enumerate() {
+        back[source] = dealt;
+    }
+    back
+}
+
 impl Primitive for BalanceParts {
     fn describe() -> &'static str {
-        "reorder dimensions so every part carries the same variance product"
+        "reorder dimensions so equal-width parts carry the same variance product"
     }
 
     fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
@@ -78,11 +104,11 @@ impl Primitive for BalanceParts {
     // encode omitted: a permutation owns no per-vector bits.
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
-        *vectors = vectors.select(Axis(1), &Self::order(model));
+        *vectors = gather(vectors.view(), &Self::order(model));
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        *queries = queries.select(Axis(1), &Self::order(model));
+        *queries = gather(queries.view(), &Self::order(model));
     }
 
     fn reconstruct(
@@ -92,11 +118,7 @@ impl Primitive for BalanceParts {
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
         let child = child_recons.expect("BalanceParts is not terminal");
-        let mut out = Array2::zeros(child.raw_dim());
-        for (dealt, &source) in Self::order(model).iter().enumerate() {
-            out.column_mut(source).assign(&child.column(dealt));
-        }
-        out
+        gather(child, &inverse(&Self::order(model)))
     }
 
     fn score(
@@ -159,6 +181,20 @@ mod tests {
         let spread = loads.iter().copied().fold(f32::MIN, f32::max)
             - loads.iter().copied().fold(f32::MAX, f32::min);
         assert!(spread < 0.01, "unbalanced parts: {loads:?}");
+    }
+
+    /// The invariant is scoped to equal widths for a reason: the deal balances variance
+    /// shifted up from the smallest, so parts holding different counts carry different
+    /// raw variance products no matter how well the deal goes. The `[8, 8, 8, 8]` case
+    /// above cannot see this.
+    #[test]
+    fn ragged_widths_balance_only_the_equal_width_parts() {
+        let spectrum = decaying(12);
+        let widths = [5, 5, 2];
+        let order = balanced_order(Array1::from(spectrum.clone()).view(), &widths);
+        let loads = loads(&spectrum, &order, &widths);
+        assert!((loads[0] - loads[1]).abs() < 0.2, "equal-width parts unbalanced: {loads:?}");
+        assert!(loads[2] > loads[0] + 2.0, "short part unexpectedly comparable: {loads:?}");
     }
 
     /// Every dimension is dealt exactly once, including into a short trailing part.

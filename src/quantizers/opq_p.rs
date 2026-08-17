@@ -1,5 +1,6 @@
 //! `opq_p`: the parametric half of Optimized Product Quantization — align to the
-//! principal components and deal them so every segment holds equal variance, then PQ.
+//! principal components and deal them so equal-width segments hold equal variance,
+//! then PQ.
 
 use anyhow::Result;
 
@@ -12,8 +13,8 @@ use crate::{BalanceParts, Center, Params, PcaRotate, Pipeline, Primitive, Quanti
 pub struct OpqP(pub Pipeline);
 
 impl OpqP {
-    /// The parametric rotation: onto the principal axes, then dealt so every part holds
-    /// the same variance product. Shared with the `opq` family's `init=eigen`.
+    /// The parametric rotation: onto the principal axes, then dealt so equal-width parts
+    /// hold the same variance product. Shared with the `opq` family's `init=eigen`.
     pub(super) fn head(section_dim: usize) -> Vec<Box<dyn Primitive>> {
         vec![Box::new(Center), Box::new(PcaRotate), Box::new(BalanceParts::new(section_dim))]
     }
