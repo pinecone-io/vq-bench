@@ -61,6 +61,7 @@ impl Primitive for OptimizePq {
             let mut recon = Array2::<f32>::zeros(rotated.raw_dim());
             for (seg, &(start, end)) in segments.iter().enumerate() {
                 let segment = rotated.slice(s![.., start..end]);
+                // Refit cold rather than from the previous step's centroids.
                 let centroids = math::lloyd_kmeans(
                     segment,
                     self.centroids,
