@@ -13,3 +13,6 @@ primitives! { Primitive:
     optimize_signs => OptimizeSigns,
     optimize_pq => OptimizePq,
 }
+
+// Not a cataloged stage: shared plumbing for the conditioners that store a rotation.
+mod rotation_model;

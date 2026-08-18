@@ -5,9 +5,10 @@ use anyhow::{bail, ensure, Context, Result};
 use serde_json::Value;
 
 use super::catalog::{get, get_or, FromParam};
-use super::opq_p::OpqP;
 use super::pq::Pq;
-use crate::{OptimizePq, Params, Pipeline, Primitive, Quantizer};
+use crate::{
+    BalanceParts, Center, OptimizePq, Params, PcaRotate, Pipeline, Primitive, Quantizer,
+};
 
 /// Alternation steps when a config does not say (Ge et al. 2013 use ~15).
 const DEFAULT_ITERS: usize = 15;
@@ -24,7 +25,7 @@ const MAX_ITERS: usize = 1000;
 const DEFAULT_INIT: Init = Init::Eigen;
 
 /// What the alternation is handed to start from: the raw data, or the parametric
-/// rotation the [`OpqP`] family applies. The alternation is locally optimal, so the two
+/// rotation the `opq_p` family applies. The alternation is locally optimal, so the two
 /// land in different places — Ge et al. 2013 report the parametric start as the best of
 /// the variants they test.
 #[derive(Clone, Copy)]
@@ -68,7 +69,12 @@ impl Opq {
         let pq = Pq::pipeline(centroids, section_dim, seed, dim)?;
         let mut stages: Vec<Box<dyn Primitive>> = Vec::new();
         if let Init::Eigen = init {
-            stages.extend(OpqP::head(section_dim));
+            // The same three stages `OpqP::pipeline` builds, so that a comparison between
+            // the families measures the alternation rather than the head. Held to it by
+            // `eigen_init_at_zero_iters_is_opq_p` below.
+            stages.push(Box::new(Center));
+            stages.push(Box::new(PcaRotate));
+            stages.push(Box::new(BalanceParts::new(section_dim)));
         }
         // At `iters == 0` there is nothing to alternate, and the stage would store a
         // whole identity rotation to say so.
@@ -115,7 +121,8 @@ impl Quantizer for Opq {
 mod tests {
     use super::*;
     use crate::math;
-    use crate::util::testing::{assert_close, params, refs};
+    use crate::quantizers::opq_p::OpqP;
+    use crate::util::testing::{assert_close, correlated, params, refs};
     use ndarray::Array2;
     use serde_json::json;
 
@@ -123,13 +130,6 @@ mod tests {
     fn opq(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Opq> {
         let p = params(&[("centroids", json!(centroids)), ("section_dim", json!(section_dim))]);
         Opq::build(&p, seed, dim)
-    }
-
-    /// Low-rank (strongly correlated) data, where a decorrelating rotation helps PQ.
-    fn correlated(n: usize, d: usize, seed: u64) -> Array2<f32> {
-        let g = math::gaussian(&mut math::seed(seed), (n, d / 4));
-        let mix = math::gaussian(&mut math::seed(seed ^ 0xabc), (d / 4, d));
-        math::matmul(g.view(), mix.view())
     }
 
     /// Mean squared reconstruction error of a fitted quantizer over its own fit set.
@@ -223,6 +223,12 @@ mod tests {
 
     /// With the parametric head and nothing to alternate, `opq` *is* `opq_p` — no
     /// leftover identity rotation, so the two also carry the same model.
+    ///
+    /// This is what keeps the two families' heads identical now that each writes its own
+    /// stages: `init = eigen` at `iters = 0` is exactly `opq_p`'s pipeline, so editing the
+    /// head in one file and not the other fails here. Without it the families could drift
+    /// apart and a comparison between them would silently start measuring the head
+    /// difference rather than the alternation.
     #[test]
     fn eigen_init_at_zero_iters_is_opq_p() {
         let v = correlated(200, 32, 7);

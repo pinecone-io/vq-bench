@@ -140,18 +140,9 @@ impl Primitive for BalanceParts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::testing::{assert_close, assert_pipeline_scores};
+    use crate::util::testing::{assert_close, assert_pipeline_scores, with_variances};
     use crate::{math, Kmeans};
     use ndarray::{array, Array1, Array2};
-
-    /// Independent columns with the prescribed variances (already the principal axes).
-    fn with_variances(n: usize, variances: &[f32], seed: u64) -> Array2<f32> {
-        let mut x = math::gaussian(&mut math::seed(seed), (n, variances.len()));
-        for (j, &v) in variances.iter().enumerate() {
-            x.column_mut(j).mapv_inplace(|e| e * v.sqrt());
-        }
-        x
-    }
 
     /// The paper's synthetic spectrum, variance e^(-0.1 d).
     fn decaying(d: usize) -> Vec<f32> {
