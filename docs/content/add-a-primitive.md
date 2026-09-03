@@ -106,14 +106,9 @@ impl Primitive for Center {
 }
 ```
 
-For a rounder — a terminal stage that owns per-vector bits — copy `src/primitives/rounders/cast_uint.rs` instead: it adds `encode`, a fixed `code_bytes`, and scores directly from the packed codes.
-
-Tests live in an inline `#[cfg(test)] mod tests`. `testing::assert_pipeline_scores` already checks that `score` matches the exact dot against the stage's own reconstruction, so most stages need no bespoke harness.
-
 ## Verify
 
 ```bash
 cargo test
-cargo clippy --all-targets -- -D warnings
 cargo run -- show primitives    # the new row appears
 ```

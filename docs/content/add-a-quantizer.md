@@ -41,17 +41,6 @@ Defaulted (override when applicable):
 | `params()` | none | the accepted param names |
 | `verify_params(params)` | flags unknown param names | checks that user parameters are valid |
 
-## The standard shape
-
-Most families are a new type over a `Pipeline` of primitives:
-
-- `pub struct Family(pub Pipeline);`
-- `pub fn pipeline(<typed params>, seed, dim) -> Result<Pipeline>` holds the `ensure!` value checks, so another family composing it is validated the same way. A `Pipeline` is itself a `Primitive`, so you can embed another family's `Other::pipeline(...)?` as a single stage.
-- `build` reads each param with `get(p, "b")?` (the param's type is inferred from `pipeline`'s signature) and wraps the result.
-- `crate::pipeline_quantizer!();` expands the four runtime methods, delegating to `self.0`.
-
-Nothing requires a `Pipeline` — a non-pipelined quantizer skips the macro and implements the four runtime methods directly.
-
 ## Example
 
 `src/quantizers/minmax.rs`, in full (tests trimmed):
@@ -119,7 +108,6 @@ The new family is immediately selectable from a run configuration — `"name"` m
 
 ```bash
 cargo test
-cargo clippy --all-targets -- -D warnings
 cargo run -- show quantizers                 # the new family appears
 cargo run -- run <config> --dry-run          # the config builds it
 ```

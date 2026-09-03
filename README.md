@@ -1,30 +1,20 @@
 # VQ-bench: a composable vector quantization framework
 
-- [About](#about)
-- [Usage](#usage)
-  - [Installation](#installation)
-  - [Downloading a dataset](#downloading-a-dataset)
-  - [Writing a run configuration](#writing-a-run-configuration)
-  - [Running a benchmark](#running-a-benchmark)
-  - [Viewing the results](#viewing-the-results)
-- [Contributing](#contributing)
-  - [Adding a primitive](#adding-a-primitive)
-  - [Adding a quantizer](#adding-a-quantizer)
-
 ## About 
 
-VQ-bench is an open-source benchmark for vector quantization. It is maintained by Amir Ingber, Edo Liberty ([Pinecone](https://pinecone.io/)), and Ashwin Padaki (University of Pennsylvania).
+VQ-bench is an open-source benchmark for vector quantization. It is maintained by [Amir Ingber](https://scholar.google.com/citations?user=0IkkBzQAAAAJ&hl=en), [Edo Liberty](https://edoliberty.com/) ([Pinecone](https://pinecone.io/)), and [Ashwin Padaki](https://apadaki.github.io/) (University of Pennsylvania).
 
-See [vq-bench.com](https://www.vq-bench.com) for current benchmarks and documentation.
+See [vq-bench.com](https://www.vq-bench.com) for current benchmarks.
 
 ## Usage
+
+This page explains how to use VQ-bench.
 
 ### Installation
 
 Begin by cloning the `vq-bench` repository and installing the `vqb` binary.
 
 ```bash
-git clone https://github.com/pinecone-io/vq-bench.git
 cd vq-bench
 cargo install --path .    # installs the vqb binary
 ```
@@ -33,7 +23,7 @@ Run `vqb` to see the full list of commands.
 
 ### Downloading a dataset
 
-The first thing you'll want to do is download a dataset which you can do with the following commands:
+The first thing you'll want to do is download a dataset using the following commands:
 ```bash
 vqb data list          # list all available datasets
 vqb data get <name>    # download a dataset
@@ -64,9 +54,10 @@ A run configuration is a single JSON file describing the datasets, evaluation pa
 | `n_base`, `n_fit`, `n_calib` | optionally subsample the base vectors, fit vectors, or calibration queries |
 | `threads` | number of threads used in encoding (default: all logical cores; overridden by the environment variable `RAYON_NUM_THREADS`) |
 
-Run `vqb show quantizers` and `vqb show metrics` to see the names of the quantizers and metrics supported in VQ-bench. The following is an example of a run configuration, `configs/minmax-compare.json`, which evaluates two quantizers on the `arxiv` dataset using three quality metrics.
+Run `vqb show quantizers` and `vqb show metrics` to see the names of the quantizers and metrics supported in VQ-bench. The following is an example of a run configuration which evaluates two quantizers on the `arxiv` dataset using three quality metrics.
 
 ```json
+// configs/minmax-compare.json
 {
   "datasets": ["arxiv"],
   "seed": 1,
@@ -105,9 +96,7 @@ vqb merge  <a> <b>             # combine JSON results files
 
 ### Output locations
 
-Every output directory defaults to a path under the current directory. Name them
-explicitly — once in your environment is enough — and where you run from stops
-mattering:
+The following environment variables specify where datasets, codes, and results are stored.
 
 | Flag | Environment | Default | Holds |
 |---|---|---|---|
@@ -116,38 +105,17 @@ mattering:
 | `--codes-dir` | `VQB_CODES_DIR` | `<results-dir>/codes` | per-method code stores |
 | `--publish-dir` | `VQB_PUBLISH_DIR` | `./docs/results` | what `publish` copies in and the site serves |
 
-The flag wins over the variable, which wins over the default. All four are global, so
-they attach to any subcommand in either position. `vqb show paths` prints what they
-resolved to, and `vqb run <config> --dry-run` reports the same block.
-
-Code stores are by far the largest artifact — roughly 8 GB per billion base-vector
-floats, so a 9-Gfloat dataset wants about 70 GB — and often belong on a different volume
-from the small results JSONs:
-
-```bash
-vqb --codes-dir /mnt/big/vqb-codes encode <config> --stream
-vqb --codes-dir /mnt/big/vqb-codes run    <config>            # reuses them
-```
-
-`encode` and `run` have to agree on the directory or the reuse check simply misses and
-re-encodes. Exporting `VQB_CODES_DIR` once is the easy way to keep them in step. Note a
-store placed outside the repository is no longer covered by `.gitignore`.
-
 ### Streaming a dataset larger than memory
 
-By default every command loads the base vectors whole, so a dataset has to fit in RAM. `--stream` reads them from disk a block at a time instead, and peak memory then tracks `--block-mb` (default 256) rather than the dataset size:
+By default every command loads the base vectors whole, so a dataset has to fit in RAM. `--stream` reads them from disk a block at a time of size `--block-mb` (default 256MB).
 
 ```bash
-vqb data get <name> -l 100 --stream   # recompute candidates without loading the base
+vqb data get <name> -l 100 --stream   # recompute candidates without loading the full base
 vqb encode <config> --stream          # fit + encode a base larger than RAM
 vqb run    <config> --stream          # ... and score it too
 ```
 
-A streamed `run` writes each method's codes to the code store (`results/codes/` by default) and scores them from there, so the code set stays off the heap as well. The codes are the same either way, and a store written by one mode is reusable by the other. (Bit-for-bit, with one caveat: a quantizer whose `encode` runs a batched matmul — `e_rabitq` does — can differ in a handful of codes, because the matmul's accumulation order depends on the batch shape and `--block-mb` sets that shape. It is a rounding difference, not a different encoding.) Lowering `--block-mb` cuts peak memory further at no cost in speed.
-
-`--stream` requires `n_fit` and `n_reconstruct` in the config, since both otherwise default to every base row — exactly what a streamed run must not hold. `vqb run <config> --dry-run --stream` reports this before reading anything.
-
-Two consequences worth knowing: `vqb data get --stream` builds the new file beside the old one, so it needs room for a second copy of the dataset on disk; and `encode_memory` counts the read block, so a streamed run's figure is not comparable with a resident one's.
+`--stream` requires `n_fit` and `n_reconstruct` in the config, since both otherwise default to every base row.
 
 ### Viewing the results
 
@@ -265,15 +233,10 @@ impl Primitive for Center {
 }
 ```
 
-For a rounder — a terminal stage that owns per-vector bits — copy `src/primitives/rounders/cast_uint.rs` instead: it adds `encode`, a fixed `code_bytes`, and scores directly from the packed codes.
-
-Tests live in an inline `#[cfg(test)] mod tests`. `testing::assert_pipeline_scores` already checks that `score` matches the exact dot against the stage's own reconstruction, so most stages need no bespoke harness.
-
 #### Verify
 
 ```bash
 cargo test
-cargo clippy --all-targets -- -D warnings
 cargo run -- show primitives    # the new row appears
 ```
 
@@ -319,17 +282,6 @@ Defaulted (override when applicable):
 | `display_name()` | the type's name | the display name used in results (`Pq` overrides it to `"PQ"`) |
 | `params()` | none | the accepted param names |
 | `verify_params(params)` | flags unknown param names | checks that user parameters are valid |
-
-#### The standard shape
-
-Most families are a new type over a `Pipeline` of primitives:
-
-- `pub struct Family(pub Pipeline);`
-- `pub fn pipeline(<typed params>, seed, dim) -> Result<Pipeline>` holds the `ensure!` value checks, so another family composing it is validated the same way. A `Pipeline` is itself a `Primitive`, so you can embed another family's `Other::pipeline(...)?` as a single stage.
-- `build` reads each param with `get(p, "b")?` (the param's type is inferred from `pipeline`'s signature) and wraps the result.
-- `crate::pipeline_quantizer!();` expands the four runtime methods, delegating to `self.0`.
-
-Nothing requires a `Pipeline` — a non-pipelined quantizer skips the macro and implements the four runtime methods directly.
 
 #### Example
 
@@ -398,7 +350,6 @@ The new family is immediately selectable from a run configuration — `"name"` m
 
 ```bash
 cargo test
-cargo clippy --all-targets -- -D warnings
 cargo run -- show quantizers                 # the new family appears
 cargo run -- run <config> --dry-run          # the config builds it
 ```
