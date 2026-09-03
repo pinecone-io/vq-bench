@@ -1,30 +1,10 @@
 # VQ-bench: a composable vector quantization framework
 
-- [VQ-bench: a composable vector quantization framework](#vq-bench-a-composable-vector-quantization-framework)
-  - [About](#about)
-  - [Usage](#usage)
-    - [Installation](#installation)
-    - [Downloading a dataset](#downloading-a-dataset)
-    - [Writing a run configuration](#writing-a-run-configuration)
-    - [Running a benchmark](#running-a-benchmark)
-    - [Output locations](#output-locations)
-    - [Streaming a dataset larger than memory](#streaming-a-dataset-larger-than-memory)
-    - [Viewing the results](#viewing-the-results)
-  - [Contributing](#contributing)
-    - [Adding a primitive](#adding-a-primitive)
-      - [The Primitive trait](#the-primitive-trait)
-      - [Example](#example)
-      - [Verify](#verify)
-    - [Adding a quantizer](#adding-a-quantizer)
-      - [The Quantizer trait](#the-quantizer-trait)
-      - [Example](#example-1)
-      - [Verify](#verify-1)
-
 ## About 
 
-VQ-bench is an open-source benchmark for vector quantization. It is maintained by Amir Ingber, Edo Liberty ([Pinecone](https://pinecone.io/)), and Ashwin Padaki (University of Pennsylvania).
+VQ-bench is an open-source benchmark for vector quantization. It is maintained by [Amir Ingber](https://scholar.google.com/citations?user=0IkkBzQAAAAJ&hl=en), [Edo Liberty](https://edoliberty.com/) ([Pinecone](https://pinecone.io/)), and [Ashwin Padaki](https://apadaki.github.io/) (University of Pennsylvania).
 
-See [vq-bench.com](https://www.vq-bench.com) for current benchmarks and documentation.
+See [vq-bench.com](https://www.vq-bench.com) for current benchmarks.
 
 ## Usage
 
