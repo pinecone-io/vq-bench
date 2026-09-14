@@ -20,9 +20,15 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin-left:20%;marg
 #nav a.lnk:hover{color:#111}
 #nav a.lnk.active{color:#111;font-weight:600}
 #nav .spacer{flex:1 1 auto}
-#nav a.gh{display:inline-flex;align-items:center;gap:6px;color:#666;text-decoration:none;font-weight:500}
-#nav a.gh:hover{color:#111}
-#nav a.gh .ghmark{display:block;width:17px;height:17px}
+#nav a.gh,#nav a.ext{display:inline-flex;align-items:center;gap:6px;color:#666;text-decoration:none;font-weight:500}
+#nav a.gh:hover,#nav a.ext:hover{color:#111}
+#nav a.gh .ghmark,#nav a.ext .icn{display:block;width:17px;height:17px}
+/* Narrow phones: drop the nav gap and the artifact labels, keeping the icons,
+   so the right-hand items never overflow the viewport. */
+@media (max-width:430px){
+  #nav{gap:14px}
+  #nav a.ext .lbl{display:none}
+}
 
 /* ── brand hero (matches the landing page's header) ─────────────────────── */
 #brand{text-align:center;font-size:34px;font-weight:700;letter-spacing:-0.01em;
