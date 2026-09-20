@@ -1,6 +1,6 @@
 //! faer-backed linear algebra over ndarray matrices.
 
-use faer::{Mat, MatRef};
+use faer::{Mat, MatRef, Side};
 use ndarray::{Array1, Array2, ArrayView2, Axis};
 
 /// Borrow a contiguous row-major slice as a faer matrix view.
@@ -62,16 +62,18 @@ pub fn orthogonal_procrustes(cross: ArrayView2<f32>) -> Array2<f32> {
 
 /// Eigenvalues (descending) and matching eigenvector columns of a symmetric matrix.
 pub fn symmetric_eigen(sym: ArrayView2<f32>) -> (Array1<f32>, Array2<f32>) {
-    // For symmetric `A = U * diag(s) * V^T` the singular vectors are the eigenvectors,
-    // and a `V` column that flipped against its `U` column marks a negative eigenvalue.
-    // The singular values sort by magnitude, so the signed values re-sort.
-    let (u, s, vt) = svd(sym);
-    let signed = Array1::from_shape_fn(s.len(), |i| s[i] * u.column(i).dot(&vt.row(i)).signum());
-    let mut order: Vec<usize> = (0..signed.len()).collect();
-    order.sort_by(|&a, &b| signed[b].total_cmp(&signed[a]));
+    let sym = sym.as_standard_layout();
+    let fa = as_faer(sym.as_slice().unwrap(), sym.nrows(), sym.ncols());
+    let evd = fa
+        .self_adjoint_eigen(Side::Lower)
+        .expect("eigendecomposition failed to converge");
+    let s = evd.S();
+    // faer documents its eigenvalue order as unspecified, so sort rather than reverse.
+    let mut order: Vec<usize> = (0..s.dim()).collect();
+    order.sort_by(|&a, &b| s[b].total_cmp(&s[a]));
     (
-        Array1::from_iter(order.iter().map(|&i| signed[i])),
-        u.select(Axis(1), &order),
+        Array1::from_iter(order.iter().map(|&i| s[i])),
+        from_faer(evd.U()).select(Axis(1), &order),
     )
 }
 
@@ -115,6 +117,27 @@ mod tests {
         for i in 0..3 {
             for j in 0..3 {
                 assert!((rebuilt[[i, j]] - a[[i, j]]).abs() < 1e-4, "[{i},{j}] = {}", rebuilt[[i, j]]);
+            }
+        }
+    }
+
+    /// The minimal `±lambda` case: one degenerate singular value, so recovering the signs
+    /// from an SVD mixed the two eigenspaces and satisfied no `A * v = lambda * v`.
+    #[test]
+    fn symmetric_eigen_separates_opposite_eigenvalues() {
+        let a = array![[0., 1.], [1., 0.]];
+        let (vals, vecs) = symmetric_eigen(a.view());
+        assert!((vals[0] - 1.0).abs() < 1e-6, "vals = {vals}");
+        assert!((vals[1] + 1.0).abs() < 1e-6, "vals = {vals}");
+        let av = matmul(a.view(), vecs.view());
+        for j in 0..2 {
+            for i in 0..2 {
+                let expect = vals[j] * vecs[[i, j]];
+                assert!(
+                    (av[[i, j]] - expect).abs() < 1e-6,
+                    "A*v[{i},{j}] = {}, lambda*v = {expect}",
+                    av[[i, j]]
+                );
             }
         }
     }
