@@ -2,7 +2,7 @@
 
 use ndarray::{Array2, ArrayView2};
 
-use crate::{AsQuantizer, Params, Pipeline, Primitive, Quantizer};
+use crate::{math, AsQuantizer, Params, Pipeline, Primitive, Quantizer};
 
 /// Borrow a slice of owned codes as the `&[&[u8]]` the trait methods expect.
 pub(crate) fn refs(codes: &[Vec<u8>]) -> Vec<&[u8]> {
@@ -41,4 +41,21 @@ pub(crate) fn assert_pipeline_scores(
         assert_close(&recon, &v.to_owned(), tol);
     }
     assert_close(&codec.score(&model, q, &r), &q.dot(&recon.t()), score_tol);
+}
+
+/// Low-rank (strongly correlated) data, where a decorrelating rotation helps PQ.
+pub(crate) fn correlated(n: usize, d: usize, seed: u64) -> Array2<f32> {
+    let g = math::gaussian(&mut math::seed(seed), (n, d / 4));
+    let mix = math::gaussian(&mut math::seed(seed ^ 0xabc), (d / 4, d));
+    math::matmul(g.view(), mix.view())
+}
+
+/// Independent Gaussian columns scaled to the prescribed variances -- i.e. data whose
+/// principal axes are already the coordinate axes, in the given order.
+pub(crate) fn with_variances(n: usize, variances: &[f32], seed: u64) -> Array2<f32> {
+    let mut x = math::gaussian(&mut math::seed(seed), (n, variances.len()));
+    for (j, &v) in variances.iter().enumerate() {
+        x.column_mut(j).mapv_inplace(|e| e * v.sqrt());
+    }
+    x
 }

@@ -14,6 +14,7 @@
 
 use ndarray::{s, Array2, ArrayView2, Axis};
 
+use super::rotation_model;
 use crate::{coding, math, Primitive, SegmentSplit};
 
 /// Lloyd iterations per segment codebook, per alternation step.
@@ -33,16 +34,6 @@ impl OptimizePq {
     pub fn new(centroids: usize, section_dim: usize, iters: usize, seed: u64) -> Self {
         debug_assert!(section_dim > 0 && (2..=256).contains(&centroids));
         Self { centroids, section_dim, iters, seed }
-    }
-
-    /// Read the `d x d` rotation back out of the model bytes.
-    fn rotation(model: &[u8]) -> Array2<f32> {
-        coding::unpack_model(model)
-    }
-
-    /// Rotate a batch in place: `m --> m R`.
-    fn rotate(model: &[u8], m: &mut Array2<f32>) {
-        *m = math::matmul(m.view(), Self::rotation(model).view());
     }
 }
 
@@ -84,11 +75,11 @@ impl Primitive for OptimizePq {
     // encode omitted: a rotation owns no per-vector bits.
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
-        Self::rotate(model, vectors);
+        rotation_model::rotate(model, vectors);
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        Self::rotate(model, queries);
+        rotation_model::rotate(model, queries);
     }
 
     fn reconstruct(
@@ -97,9 +88,7 @@ impl Primitive for OptimizePq {
         _codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let child = child_recons.expect("OptimizePq is not terminal");
-        let rotation = Self::rotation(model);
-        math::matmul(child, rotation.t())
+        rotation_model::unrotate(model, child_recons.expect("OptimizePq is not terminal"))
     }
 
     fn score(
@@ -121,23 +110,18 @@ impl Primitive for OptimizePq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::testing::{assert_close, refs};
+    use crate::util::testing::{assert_close, correlated, refs};
     use crate::{AsQuantizer, Kmeans, Pipeline, Quantizer, Split};
     use ndarray::Array2;
 
-    /// Alternation steps the `opq` family defaults to.
-    const DEFAULT_ITERS: usize = 15;
+    /// A representative alternation count. Not tied to the `opq` family's default -- a
+    /// primitive does not know it, and asserting against a stale copy of it is worse than
+    /// asserting against a number these tests own.
+    const ITERS: usize = 15;
 
-    /// The default non-parametric stage: 16 centroids, `DEFAULT_ITERS` steps.
+    /// The default non-parametric stage: 16 centroids, `ITERS` steps.
     fn optimize(section_dim: usize, seed: u64) -> OptimizePq {
-        OptimizePq::new(16, section_dim, DEFAULT_ITERS, seed)
-    }
-
-    /// Low-rank (strongly correlated) data, where a decorrelating rotation helps PQ.
-    fn correlated(n: usize, d: usize, seed: u64) -> Array2<f32> {
-        let g = math::gaussian(&mut math::seed(seed), (n, d / 4));
-        let mix = math::gaussian(&mut math::seed(seed ^ 0xabc), (d / 4, d));
-        math::matmul(g.view(), mix.view())
+        OptimizePq::new(16, section_dim, ITERS, seed)
     }
 
     /// PQ reconstruction error of `x` under rotation `r` (fresh per-segment codebooks).
@@ -187,7 +171,7 @@ mod tests {
         // The learned rotation lowers PQ reconstruction error below a random one.
         let v = correlated(200, 16, 1);
         let model = optimize(4, 5).fit(v.view(), None);
-        let learned = OptimizePq::rotation(&model);
+        let learned = rotation_model::matrix(&model);
         let random = math::random_orthogonal(&mut math::seed(123), 16);
         assert!(pq_error(&v, &learned, 16, 4) <= pq_error(&v, &random, 16, 4));
     }
@@ -198,7 +182,7 @@ mod tests {
     fn zero_iters_is_the_identity() {
         let v = correlated(200, 16, 4);
         let model = OptimizePq::new(16, 4, 0, 5).fit(v.view(), None);
-        assert_eq!(OptimizePq::rotation(&model), Array2::<f32>::eye(16));
+        assert_eq!(rotation_model::matrix(&model), Array2::<f32>::eye(16));
     }
 
     /// More alternation steps do not raise PQ error on the data they were fitted to.
@@ -207,9 +191,9 @@ mod tests {
         let v = correlated(200, 16, 6);
         let error = |iters| {
             let model = OptimizePq::new(16, 4, iters, 5).fit(v.view(), None);
-            pq_error(&v, &OptimizePq::rotation(&model), 16, 4)
+            pq_error(&v, &rotation_model::matrix(&model), 16, 4)
         };
-        assert!(error(DEFAULT_ITERS) <= error(1), "15 steps worse than 1");
+        assert!(error(ITERS) <= error(1), "15 steps worse than 1");
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 use ndarray::{Array2, ArrayView2};
 
+use super::rotation_model;
 use crate::{coding, math, Primitive};
 
 /// ITQ alternation steps (Gong et al. 2013 use 50).
@@ -23,16 +24,6 @@ impl OptimizeSigns {
     /// A learned sign-quantization rotation; `seed` drives the Haar init.
     pub fn new(seed: u64) -> Self {
         Self { seed }
-    }
-
-    /// Read the `d x d` rotation back out of the model bytes.
-    fn rotation(model: &[u8]) -> Array2<f32> {
-        coding::unpack_model(model)
-    }
-
-    /// Rotate a batch in place: `m --> m R`.
-    fn rotate(model: &[u8], m: &mut Array2<f32>) {
-        *m = math::matmul(m.view(), Self::rotation(model).view());
     }
 }
 
@@ -57,11 +48,11 @@ impl Primitive for OptimizeSigns {
     // encode omitted: a rotation owns no per-vector bits.
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
-        Self::rotate(model, vectors);
+        rotation_model::rotate(model, vectors);
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        Self::rotate(model, queries);
+        rotation_model::rotate(model, queries);
     }
 
     fn reconstruct(
@@ -70,9 +61,7 @@ impl Primitive for OptimizeSigns {
         _codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let child = child_recons.expect("OptimizeSigns is not terminal");
-        let rotation = Self::rotation(model);
-        math::matmul(child, rotation.t())
+        rotation_model::unrotate(model, child_recons.expect("OptimizeSigns is not terminal"))
     }
 
     fn score(
@@ -134,7 +123,7 @@ mod tests {
         // is <= that of its own Haar init.
         let v = math::gaussian(&mut math::seed(1), (200, 16));
         let model = OptimizeSigns::new(5).fit(v.view(), None);
-        let learned = OptimizeSigns::rotation(&model);
+        let learned = rotation_model::matrix(&model);
         let init = math::random_orthogonal(&mut math::seed(5), 16);
         assert!(sign_error(&v, &learned) <= sign_error(&v, &init) + 1e-3);
     }

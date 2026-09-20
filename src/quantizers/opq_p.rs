@@ -6,27 +6,32 @@ use anyhow::Result;
 
 use super::catalog::get;
 use super::pq::Pq;
-use crate::{BalanceParts, Center, Params, PcaRotate, Pipeline, Primitive, Quantizer};
+use crate::{BalanceParts, Center, Params, PcaRotate, Pipeline, Quantizer};
 
 /// The `opq_p` family. Closed-form under a Gaussian assumption, so nothing is
 /// alternated; `opq` with `init=eigen` runs its alternation behind the same head.
 pub struct OpqP(pub Pipeline);
 
 impl OpqP {
-    /// The parametric rotation: onto the principal axes, then dealt so equal-width parts
-    /// hold the same variance product. Shared with the `opq` family's `init=eigen`.
-    pub(super) fn head(section_dim: usize) -> Vec<Box<dyn Primitive>> {
-        vec![Box::new(Center), Box::new(PcaRotate), Box::new(BalanceParts::new(section_dim))]
-    }
-
-    /// The parametric rotation, then PQ over `section_dim`-column segments with
-    /// `centroids` codewords each (distinct seed per segment) — composed via
+    /// The parametric rotation — onto the principal axes, then dealt so equal-width parts
+    /// hold the same variance product — then PQ over `section_dim`-column segments with
+    /// `centroids` codewords each (distinct seed per segment), composed via
     /// [`Pq::pipeline`], which also validates the params.
+    ///
+    /// `opq` at `init = eigen` builds the same three stages; the two are held to that by
+    /// `opq`'s `eigen_init_at_zero_iters_is_opq_p`, so changing them here without changing
+    /// them there fails that test rather than silently making the families incomparable.
     pub fn pipeline(centroids: usize, section_dim: usize, seed: u64, dim: usize) -> Result<Pipeline> {
         let pq = Pq::pipeline(centroids, section_dim, seed, dim)?;
-        let mut stages = Self::head(section_dim);
-        stages.push(Box::new(pq));
-        Pipeline::new(dim, stages)
+        Pipeline::new(
+            dim,
+            vec![
+                Box::new(Center),
+                Box::new(PcaRotate),
+                Box::new(BalanceParts::new(section_dim)),
+                Box::new(pq),
+            ],
+        )
     }
 }
 

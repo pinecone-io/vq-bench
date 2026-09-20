@@ -11,21 +11,10 @@
 
 use ndarray::{Array2, ArrayView2};
 
+use super::rotation_model;
 use crate::{coding, math, Primitive};
 
 pub struct PcaRotate;
-
-impl PcaRotate {
-    /// Read the `d x d` rotation back out of the model bytes.
-    fn rotation(model: &[u8]) -> Array2<f32> {
-        coding::unpack_model(model)
-    }
-
-    /// Rotate a batch in place: `m --> m R`.
-    fn rotate(model: &[u8], m: &mut Array2<f32>) {
-        *m = math::matmul(m.view(), Self::rotation(model).view());
-    }
-}
 
 impl Primitive for PcaRotate {
     fn describe() -> &'static str {
@@ -40,11 +29,11 @@ impl Primitive for PcaRotate {
     // encode omitted: a rotation owns no per-vector bits.
 
     fn apply(&self, model: &[u8], vectors: &mut Array2<f32>, _codes: &[&[u8]]) {
-        Self::rotate(model, vectors);
+        rotation_model::rotate(model, vectors);
     }
 
     fn apply_queries(&self, model: &[u8], queries: &mut Array2<f32>) {
-        Self::rotate(model, queries);
+        rotation_model::rotate(model, queries);
     }
 
     fn reconstruct(
@@ -53,8 +42,7 @@ impl Primitive for PcaRotate {
         _codes: &[&[u8]],
         child_recons: Option<ArrayView2<f32>>,
     ) -> Array2<f32> {
-        let child = child_recons.expect("PcaRotate is not terminal");
-        math::matmul(child, Self::rotation(model).t())
+        rotation_model::unrotate(model, child_recons.expect("PcaRotate is not terminal"))
     }
 
     fn score(
@@ -76,19 +64,15 @@ impl Primitive for PcaRotate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::testing::{assert_close, assert_pipeline_scores};
+    use crate::util::testing::{assert_close, assert_pipeline_scores, with_variances};
     use crate::Kmeans;
     use ndarray::{Array2, Axis};
 
-    /// Data with a prescribed spectrum: independent Gaussian columns scaled by
-    /// `sqrt(variances)`, centered as the stage expects, then rotated so the axes are not
-    /// already principal.
+    /// Data with a prescribed spectrum: [`with_variances`], centered as the stage expects,
+    /// then rotated so the axes are not already principal.
     fn with_spectrum(n: usize, variances: &[f32], seed: u64) -> Array2<f32> {
         let d = variances.len();
-        let mut x = math::gaussian(&mut math::seed(seed), (n, d));
-        for (j, &v) in variances.iter().enumerate() {
-            x.column_mut(j).mapv_inplace(|e| e * v.sqrt());
-        }
+        let mut x = with_variances(n, variances, seed);
         let mean = x.mean_axis(Axis(0)).unwrap();
         x -= &mean.broadcast((n, d)).unwrap();
         math::matmul(x.view(), math::random_orthogonal(&mut math::seed(seed ^ 0xf00), d).view())
