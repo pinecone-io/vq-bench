@@ -27,7 +27,7 @@ impl OpqP {
             dim,
             vec![
                 Box::new(Center),
-                Box::new(PcaRotate),
+                Box::new(PcaRotate::default()),
                 Box::new(BalanceParts::new(section_dim)),
                 Box::new(pq),
             ],

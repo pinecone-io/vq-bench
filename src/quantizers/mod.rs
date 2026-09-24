@@ -30,6 +30,7 @@ quantizers! {
     rabitq => RaBitQ,
     e_rabitq => ERaBitQ,
     pq => Pq,
+    pq_rr => PqRr,
     opq => Opq,
     opq_p => OpqP,
 }

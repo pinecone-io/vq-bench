@@ -73,7 +73,7 @@ impl Opq {
             // the families measures the alternation rather than the head. Held to it by
             // `eigen_init_at_zero_iters_is_opq_p` below.
             stages.push(Box::new(Center));
-            stages.push(Box::new(PcaRotate));
+            stages.push(Box::new(PcaRotate::default()));
             stages.push(Box::new(BalanceParts::new(section_dim)));
         }
         // At `iters == 0` there is nothing to alternate, and the stage would store a
