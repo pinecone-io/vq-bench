@@ -29,6 +29,7 @@ quantizers! {
     turboquant_prod => TurboquantProd,
     rabitq => RaBitQ,
     e_rabitq => ERaBitQ,
+    c_rabitq => CRaBitQ,
     pq => Pq,
     pq_rr => PqRr,
     opq => Opq,
