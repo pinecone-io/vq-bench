@@ -1,0 +1,26 @@
+{
+  "datasets": [
+    "arxiv",
+    "ccnews",
+    "coco",
+    "hotpotqa",
+    "imagenet",
+    "laion",
+    "landmark",
+    "llama",
+    "msmarco",
+    "yahoo"
+  ],
+  "seed": 1,
+  "n_fit": 25000,
+  "n_reconstruct": 1000,
+  "n_eval": 1000,
+  "k": [1, 10, 100],
+  "temp": [0.05, 0.2, 1],
+  "methods": [
+    { "name": "rabitq" },
+    { "name": "c_rabitq", "centroids": [16, 64, 256, 1024] },
+    { "name": "e_rabitq", "b": [2, 3, 4, 6] },
+    { "name": "opq", "centroids": 256, "section_dim": [8, 4, 3, 2] }
+  ]
+}

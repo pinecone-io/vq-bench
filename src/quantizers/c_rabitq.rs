@@ -1,36 +1,58 @@
 //! `c_rabitq`: clustered RaBitQ scored by the paper's 4-bit query estimator.
 //!
-//! Encode assigns each vector to its nearest k-means centroid, rotates the unit
-//! residual, and stores the sign bits, the residual norm, the sign alignment, and
-//! `<residual, centroid>`. Score quantizes the rotated query to 4 bits, estimates
-//! the residual inner product, and adds the exact centroid dot.
+//! Encode assigns each vector to its nearest squared-L2 centroid, pads the unit
+//! residual to `D = max(256, ceil(d/64)*64)`, and applies four rounds of random
+//! signs, an orthonormal 64-point Walsh–Hadamard (`H_64 / 8`, Fino–Algazi), and a
+//! permutation. That structured map is the Fastfood / FJLT rotation the RaBitQ
+//! estimator is proved against (Gao & Long, SIGMOD 2024; the extended estimator
+//! quantizes the rotated query to 4 bits). The centroid id is packed as extra
+//! 1-bit fields ahead of the residual signs. The code also stores the residual
+//! norm, the sign alignment, and `<residual, centroid>`. Score adds the exact
+//! centroid dot to the unbiased residual estimate.
 //!
 //! This is not catalog `rabitq` with k-means swapped in for `Center`. That family
 //! still scores with `CastAngular`.
 
 use anyhow::{ensure, Result};
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rand::RngExt;
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2};
 
-use super::catalog::{get, get_or};
-use super::rotation::Rotation;
-use crate::coding::{take, take_len, CodeLayout, ModelField};
-use crate::{math, Params, Primitive, Quantizer};
+use super::catalog::get;
+use crate::coding::{CodeLayout, ModelField};
+use crate::{math, Params, Quantizer};
 
-/// Lloyd steps, the same budget as the `Kmeans` rounder.
-const LLOYD_ITERS: usize = 25;
+/// Ten Lloyd rounds. Assignment stays squared L2; this bench scores inner products.
+const LLOYD_ITERS: usize = 10;
 /// Query coordinates are quantized to this many bits (`2^4 - 1` positive steps).
 const QUERY_STEPS: f32 = 15.0;
 /// A sign alignment below this cannot scale an estimate.
 const MIN_DOT: f32 = 1e-3;
+/// Walsh–Hadamard block. `D` is a multiple of this, and at least [`MIN_PAD`].
+const BLOCK: usize = 64;
+/// Short vectors are padded out to this width before the orthogonal map.
+const MIN_PAD: usize = 256;
+/// Rounds of signs, block Hadamard, and a permutation.
+const ROUNDS: usize = 4;
+/// List ids above this are rejected. The id is extra 1-bit fields, so the cap is
+/// not the 8-bit packer width; `2^16` covers a √N codebook on these suites.
+const MAX_CENTROIDS: usize = 1 << 16;
+/// Separates the per-centroid dither stream from the rotation stream.
+const OFFSET_SALT: u64 = 0x5157;
 
-/// The `c_rabitq` family. `centroids` is range-checked in `build`; `rotation`
-/// defaults to Hadamard.
+/// The `c_rabitq` family. `centroids` is range-checked in `build`. The orthogonal
+/// map is a function of the run seed and `dim`.
 pub struct CRaBitQ {
     centroids: usize,
     seed: u64,
     dim: usize,
-    rot: Box<dyn Primitive>,
+    width: usize,
+    rounds: Vec<Round>,
+}
+
+/// One round: diagonal ±1, then `H_64 / 8` on each block, then a permutation.
+struct Round {
+    signs: Vec<f32>,
+    /// `perm[i]` is the destination of coordinate `i`.
+    perm: Vec<usize>,
 }
 
 /// 4-bit grid of one rotated query, plus the scalar facts the estimator folds in.
@@ -39,7 +61,7 @@ struct QueryGrid {
     /// the stored `<residual, centroid>`.
     centred: bool,
     gnorm: f32,
-    /// Exact `<centroid, query>`.
+    /// Exact `<centroid, query>`, accumulated in f64 and stored as f32.
     cq: f32,
     v_l: f32,
     delta: f32,
@@ -47,30 +69,132 @@ struct QueryGrid {
     qbar: Vec<u8>,
 }
 
+/// SplitMix64 (Steele, Lea, and Flood). Local so the map and the dither do not
+/// go through `math::seed`.
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
+    }
+}
+
+impl Round {
+    fn draw(rng: &mut SplitMix64, width: usize) -> Self {
+        let signs = (0..width)
+            .map(|_| if rng.next_u64() & 1 == 0 { -1.0 } else { 1.0 })
+            .collect();
+        let mut perm: Vec<usize> = (0..width).collect();
+        for i in (1..width).rev() {
+            let j = (rng.next_u64() as usize) % (i + 1);
+            perm.swap(i, j);
+        }
+        Self { signs, perm }
+    }
+
+    /// `perm ∘ (H/8) ∘ signs`. Each factor is an involution, so the inverse is
+    /// `signs ∘ (H/8) ∘ perm⁻¹`.
+    fn forward(&self, buf: &mut [f32]) {
+        for (x, &sign) in buf.iter_mut().zip(&self.signs) {
+            *x *= sign;
+        }
+        hadamard_blocks(buf);
+        let src = buf.to_vec();
+        for (i, &dest) in self.perm.iter().enumerate() {
+            buf[dest] = src[i];
+        }
+    }
+
+    fn inverse(&self, buf: &mut [f32]) {
+        let src = buf.to_vec();
+        for (i, &dest) in self.perm.iter().enumerate() {
+            buf[i] = src[dest];
+        }
+        hadamard_blocks(buf);
+        for (x, &sign) in buf.iter_mut().zip(&self.signs) {
+            *x *= sign;
+        }
+    }
+}
+
 impl CRaBitQ {
     fn index_bits(&self) -> usize {
         (self.centroids as u32).next_power_of_two().trailing_zeros() as usize
     }
 
-    fn rotated_dim(&self) -> usize {
-        self.rot.out_dim(self.dim)
-    }
-
     /// Sign bits of the rotated residual, then `rnorm`, `dot`, `<r, centroid>`.
-    fn layout(&self, rotated: usize) -> CodeLayout {
-        CodeLayout::new().bits(self.index_bits() + rotated, 1).scalars(3)
+    /// The centroid id occupies the leading 1-bit fields.
+    fn layout(&self) -> CodeLayout {
+        CodeLayout::new().bits(self.index_bits() + self.width, 1).scalars(3)
     }
 
     /// Dither in `(0, 1)`, one per rotated coordinate, fixed for a centroid.
-    fn offsets(&self, rotated: usize) -> Vec<Vec<f32>> {
+    fn offsets(&self) -> Vec<Vec<f32>> {
         (0..self.centroids)
             .map(|j| {
-                let mut rng = math::seed(self.seed.wrapping_add(j as u64).wrapping_add(0x5157));
-                (0..rotated)
-                    .map(|_| (rng.random::<u8>() as f32 + 0.5) / 256.0)
+                let mut rng = SplitMix64::new(self.seed.wrapping_add(j as u64).wrapping_add(OFFSET_SALT));
+                (0..self.width)
+                    .map(|_| (rng.next_u64() as u8 as f32 + 0.5) / 256.0)
                     .collect()
             })
             .collect()
+    }
+
+    /// Zero-pad each row from `dim` to `D`.
+    fn embed(&self, data: ArrayView2<f32>) -> Array2<f32> {
+        assert_eq!(data.ncols(), self.dim, "c_rabitq built for another dim");
+        let mut padded = Array2::zeros((data.nrows(), self.width));
+        padded.slice_mut(s![.., ..self.dim]).assign(&data);
+        padded
+    }
+
+    fn forward_rows(&self, rows: &mut Array2<f32>) {
+        self.map_rows(rows, false);
+    }
+
+    fn inverse_rows(&self, rows: &mut Array2<f32>) {
+        self.map_rows(rows, true);
+    }
+
+    fn map_rows(&self, rows: &mut Array2<f32>, inverse: bool) {
+        assert_eq!(rows.ncols(), self.width, "orthogonal map width");
+        for mut row in rows.rows_mut() {
+            let mut buf: Vec<f32> = row.iter().copied().collect();
+            if inverse {
+                for round in self.rounds.iter().rev() {
+                    round.inverse(&mut buf);
+                }
+            } else {
+                for round in &self.rounds {
+                    round.forward(&mut buf);
+                }
+            }
+            for (dst, src) in row.iter_mut().zip(&buf) {
+                *dst = *src;
+            }
+        }
+    }
+
+    fn rotate(&self, data: ArrayView2<f32>) -> Array2<f32> {
+        let mut padded = self.embed(data);
+        self.forward_rows(&mut padded);
+        padded
+    }
+
+    /// Inverse map, then drop the pad. `data` is `(n, D)`.
+    fn unrotate(&self, mut data: Array2<f32>) -> Array2<f32> {
+        self.inverse_rows(&mut data);
+        data.slice(s![.., ..self.dim]).to_owned()
     }
 }
 
@@ -84,7 +208,7 @@ impl Quantizer for CRaBitQ {
     }
 
     fn params() -> &'static [&'static str] {
-        &["centroids", "rotation"]
+        &["centroids"]
     }
 
     fn describe() -> &'static str {
@@ -94,29 +218,26 @@ impl Quantizer for CRaBitQ {
     fn build(p: &Params, seed: u64, dim: usize) -> Result<Self> {
         let centroids: usize = get(p, "centroids")?;
         ensure!(
-            (2..=1 << CodeLayout::MAX_BITS).contains(&centroids),
-            "centroids must be in 2..={}, got {centroids}",
-            1u32 << CodeLayout::MAX_BITS
+            (2..=MAX_CENTROIDS).contains(&centroids),
+            "centroids must be in 2..={MAX_CENTROIDS}, got {centroids}"
         );
-        let rotation = get_or(p, "rotation", Rotation::Hadamard)?;
-        Ok(Self {
-            centroids,
-            seed,
-            dim,
-            rot: rotation.stage(seed),
-        })
+        let width = padded_width(dim);
+        let mut rng = SplitMix64::new(seed);
+        let rounds = (0..ROUNDS).map(|_| Round::draw(&mut rng, width)).collect();
+        Ok(Self { centroids, seed, dim, width, rounds })
     }
 
-    fn fit(&self, vectors: ArrayView2<f32>, queries: Option<ArrayView2<f32>>) -> Vec<u8> {
+    fn fit(&self, vectors: ArrayView2<f32>, _queries: Option<ArrayView2<f32>>) -> Vec<u8> {
         assert_eq!(vectors.ncols(), self.dim, "c_rabitq built for another dim");
         let centroids = math::lloyd_kmeans(vectors, self.centroids, LLOYD_ITERS, self.seed);
-        let rot = self.rot.fit(vectors, queries);
-        pack_state(&centroids, &rot)
+        let mut buf = Vec::new();
+        centroids.write(&mut buf);
+        buf
     }
 
     fn encode(&self, model: &[u8], vectors: ArrayView2<f32>) -> Vec<Vec<u8>> {
         assert_eq!(vectors.ncols(), self.dim, "c_rabitq built for another dim");
-        let (centroids, rot_model) = unpack_state(model);
+        let centroids = unpack_state(model);
         let idx = math::nearest_centroid(vectors, centroids.view());
         let n = vectors.nrows();
         let mut residual = vectors.to_owned();
@@ -132,13 +253,12 @@ impl Quantizer for CRaBitQ {
             .map(|row| row.dot(&row).sqrt())
             .collect();
         math::scale_rows(&mut residual, math::reciprocal(rnorm.view()).view());
-        self.rot.apply(rot_model, &mut residual, &[]);
-        let rotated = residual.ncols();
-        assert_eq!(rotated, self.rotated_dim(), "rotation width changed");
+        let rotated = self.rotate(residual.view());
+        let width = self.width;
 
         let ib = self.index_bits();
-        let sqrt_d = (rotated as f32).sqrt();
-        let mut levels = Array2::<u32>::zeros((n, ib + rotated));
+        let sqrt_d = (width as f32).sqrt();
+        let mut levels = Array2::<u32>::zeros((n, ib + width));
         let mut dot = Array1::<f32>::ones(n);
         for i in 0..n {
             let mut row = levels.row_mut(i);
@@ -150,26 +270,25 @@ impl Quantizer for CRaBitQ {
                 continue; // code 0, dot 1
             }
             let mut l1 = 0.0f32;
-            for j in 0..rotated {
-                let coord = residual[[i, j]];
+            for j in 0..width {
+                let coord = rotated[[i, j]];
                 row[ib + j] = u32::from(coord >= 0.0);
                 l1 += coord.abs();
             }
             dot[i] = l1 / sqrt_d;
         }
-        self.layout(rotated).pack(levels.view(), &[rnorm.view(), dot.view(), rc.view()])
+        self.layout().pack(levels.view(), &[rnorm.view(), dot.view(), rc.view()])
     }
 
     fn reconstruct(&self, model: &[u8], codes: &[&[u8]]) -> Array2<f32> {
         if codes.is_empty() {
             return Array2::zeros((0, self.dim));
         }
-        let (centroids, rot_model) = unpack_state(model);
-        let (levels, [rnorm, dot, _rc]) = self.layout(self.rotated_dim()).unpack::<3>(codes);
+        let centroids = unpack_state(model);
+        let (levels, [rnorm, dot, _rc]) = self.layout().unpack::<3>(codes);
         let ib = self.index_bits();
-        let rotated = self.rotated_dim();
-        let sqrt_d = (rotated as f32).sqrt();
-        let mut oriented = Array2::<f32>::zeros((codes.len(), rotated));
+        let sqrt_d = (self.width as f32).sqrt();
+        let mut oriented = Array2::<f32>::zeros((codes.len(), self.width));
         let mut indexes = Vec::with_capacity(codes.len());
         for (i, row) in levels.rows().into_iter().enumerate() {
             indexes.push(read_index(row, ib));
@@ -177,12 +296,12 @@ impl Quantizer for CRaBitQ {
                 continue;
             }
             let scale = rnorm[i] / (sqrt_d * dot[i]);
-            for j in 0..rotated {
+            for j in 0..self.width {
                 let sign = if row[ib + j] == 0 { -1.0 } else { 1.0 };
                 oriented[[i, j]] = sign * scale;
             }
         }
-        let mut out = self.rot.reconstruct(rot_model, &[], Some(oriented.view()));
+        let mut out = self.unrotate(oriented);
         for (i, &index) in indexes.iter().enumerate() {
             let mut row = out.row_mut(i);
             row += &centroids.row(index);
@@ -196,22 +315,15 @@ impl Quantizer for CRaBitQ {
         if queries.nrows() == 0 || codes.is_empty() {
             return out;
         }
-        let (centroids, rot_model) = unpack_state(model);
-        let rotated = self.rotated_dim();
-        let (levels, [rnorm, dot, rc]) = self.layout(rotated).unpack::<3>(codes);
+        let centroids = unpack_state(model);
+        let (levels, [rnorm, dot, rc]) = self.layout().unpack::<3>(codes);
         let ib = self.index_bits();
-        let indexes: Vec<usize> = levels
-            .rows()
-            .into_iter()
-            .map(|row| read_index(row, ib))
-            .collect();
+        let indexes: Vec<usize> = levels.rows().into_iter().map(|row| read_index(row, ib)).collect();
 
-        let mut q_rot = queries.to_owned();
-        self.rot.apply_queries(rot_model, &mut q_rot);
-        let mut c_rot = centroids.clone();
-        self.rot.apply(rot_model, &mut c_rot, &[]);
+        let q_rot = self.rotate(queries);
+        let c_rot = self.rotate(centroids.view());
         let cnorm2: Vec<f32> = centroids.rows().into_iter().map(|c| c.dot(&c)).collect();
-        let offsets = self.offsets(rotated);
+        let offsets = self.offsets();
 
         for qi in 0..queries.nrows() {
             let q = queries.row(qi);
@@ -247,6 +359,11 @@ impl Quantizer for CRaBitQ {
     }
 }
 
+/// `D = max(256, ceil(d/64)*64)`.
+fn padded_width(dim: usize) -> usize {
+    (dim.div_ceil(BLOCK) * BLOCK).max(MIN_PAD)
+}
+
 fn read_index(row: ArrayView1<u32>, bits: usize) -> usize {
     let mut index = 0usize;
     for b in 0..bits {
@@ -255,21 +372,36 @@ fn read_index(row: ArrayView1<u32>, bits: usize) -> usize {
     index
 }
 
-fn pack_state(centroids: &Array2<f32>, rot: &[u8]) -> Vec<u8> {
-    let mut buf = Vec::new();
-    centroids.write(&mut buf);
-    crate::coding::put_len(&mut buf, rot.len());
-    buf.extend_from_slice(rot);
-    buf
-}
-
-fn unpack_state(model: &[u8]) -> (Array2<f32>, &[u8]) {
+fn unpack_state(model: &[u8]) -> Array2<f32> {
     let mut cur = model;
     let centroids = Array2::<f32>::read(&mut cur);
-    let n = take_len(&mut cur);
-    let rot = take(&mut cur, n);
     assert!(cur.is_empty(), "trailing model bytes");
-    (centroids, rot)
+    centroids
+}
+
+/// Orthonormal Walsh–Hadamard on every 64-block. Unnormalized `H_64` squares to
+/// `64 I` and is symmetric, so scaling by `1/8` makes the block map an involution.
+fn hadamard_blocks(buf: &mut [f32]) {
+    debug_assert_eq!(buf.len() % BLOCK, 0);
+    for block in buf.chunks_exact_mut(BLOCK) {
+        let mut len = 1;
+        while len < BLOCK {
+            let mut i = 0;
+            while i < BLOCK {
+                for j in 0..len {
+                    let a = block[i + j];
+                    let b = block[i + j + len];
+                    block[i + j] = a + b;
+                    block[i + j + len] = a - b;
+                }
+                i += len << 1;
+            }
+            len <<= 1;
+        }
+        for x in block.iter_mut() {
+            *x *= 1.0 / 8.0;
+        }
+    }
 }
 
 /// 4-bit levels of `q_prime` on `[min, max]`, dithered by `offsets` in `(0, 1)`.
@@ -301,8 +433,13 @@ fn prepare_list(
     offsets: &[f32],
 ) -> QueryGrid {
     let qnorm = qnorm2.sqrt();
-    let cq = centroid.dot(&q);
-    let gnorm_c = (qnorm2 + cnorm2 - 2.0 * cq).max(0.0).sqrt();
+    let cq64 = centroid
+        .iter()
+        .zip(q.iter())
+        .map(|(&c, &qi)| f64::from(c) * f64::from(qi))
+        .sum::<f64>();
+    let cq = cq64 as f32;
+    let gnorm_c = (f64::from(qnorm2) + f64::from(cnorm2) - 2.0 * cq64).max(0.0).sqrt() as f32;
     // A tie stays on the plain query: its scale is no larger.
     let centred = gnorm_c < qnorm;
     let gnorm = if centred { gnorm_c } else { qnorm };
@@ -353,20 +490,53 @@ mod tests {
     }
 
     /// The `c_rabitq` quantizer, with params given as configs give them.
-    fn c_rabitq(centroids: usize, rotation: &str, seed: u64, dim: usize) -> Result<CRaBitQ> {
-        let p = params(&[("centroids", json!(centroids)), ("rotation", json!(rotation))]);
+    fn c_rabitq(centroids: usize, seed: u64, dim: usize) -> Result<CRaBitQ> {
+        let p = params(&[("centroids", json!(centroids))]);
         CRaBitQ::build(&p, seed, dim)
     }
 
     #[test]
     fn rejects_bad_params() {
-        assert!(c_rabitq(1, "hadamard", 1, 64).is_err()); // < 2 centroids
-        assert!(c_rabitq(257, "hadamard", 1, 64).is_err()); // > 256 centroids
-        assert!(c_rabitq(16, "nope", 1, 64).is_err()); // unknown rotation
-        assert!(c_rabitq(2, "hadamard", 1, 64).is_ok());
-        assert!(c_rabitq(256, "full", 1, 64).is_ok());
+        assert!(c_rabitq(1, 1, 64).is_err()); // < 2 centroids
+        assert!(c_rabitq(MAX_CENTROIDS + 1, 1, 64).is_err());
+        assert!(c_rabitq(2, 1, 64).is_ok());
+        assert!(c_rabitq(1024, 1, 64).is_ok()); // past the old 8-bit id cap
+        assert!(c_rabitq(MAX_CENTROIDS, 1, 64).is_ok());
         let bare = params(&[("centroids", json!(16))]);
         assert!(CRaBitQ::build(&bare, 1, 64).is_ok());
+        let rotation = params(&[("centroids", json!(16)), ("rotation", json!("hadamard"))]);
+        let problems = CRaBitQ::verify_params(&rotation);
+        assert!(problems.iter().any(|m| m.contains("rotation")), "{problems:?}");
+    }
+
+    #[test]
+    fn pads_to_at_least_256_and_a_multiple_of_64() {
+        assert_eq!(padded_width(20), 256);
+        assert_eq!(padded_width(64), 256);
+        assert_eq!(padded_width(128), 256);
+        assert_eq!(padded_width(256), 256);
+        assert_eq!(padded_width(257), 320);
+        assert_eq!(padded_width(384), 384);
+    }
+
+    /// Signs, `H_64 / 8`, and the permutation are involutions, in reverse order.
+    #[test]
+    fn rotation_inverse_restores_the_pad() {
+        let codec = c_rabitq(2, 1, 20).unwrap();
+        assert_eq!(codec.width, 256);
+        let mut rng = math::seed(11);
+        let x = math::gaussian(&mut rng, (5, 20));
+        let padded = codec.embed(x.view());
+        let mut y = padded.clone();
+        codec.forward_rows(&mut y);
+        assert!(y.iter().zip(padded.iter()).any(|(a, b)| (a - b).abs() > 1e-2));
+        codec.inverse_rows(&mut y);
+        let max = y
+            .iter()
+            .zip(padded.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max < 1e-3, "round trip max abs {max}");
     }
 
     /// The packed levels reproduce `<q_hat, ±1/sqrt(D)>` coordinate-wise.
@@ -419,24 +589,54 @@ mod tests {
         assert!((got - 0.25).abs() < 1e-5, "{got}");
     }
 
-    /// Build, encode, and score. Dim 20 is not a multiple of 64, so Hadamard pads.
+    /// Build, encode, and score. Dim 20 pads to 256.
     #[test]
     fn encodes_and_scores() {
         let mut rng = math::seed(3);
         let d = 20;
         let v: Array2<f32> = math::gaussian(&mut rng, (30, d));
         let q: Array2<f32> = math::gaussian(&mut rng, (4, d));
-        let codec = c_rabitq(4, "hadamard", 1, d).unwrap();
+        let codec = c_rabitq(4, 1, d).unwrap();
+        assert_eq!(codec.width, 256);
         let model = codec.fit(v.view(), None);
         let codes = codec.encode(&model, v.view());
-        let implicit = CRaBitQ::build(&params(&[("centroids", json!(4))]), 1, d).unwrap();
-        assert_eq!(codes, implicit.encode(&implicit.fit(v.view(), None), v.view()));
+        let again = CRaBitQ::build(&params(&[("centroids", json!(4))]), 1, d).unwrap();
+        assert_eq!(codes, again.encode(&again.fit(v.view(), None), v.view()));
         assert!(codes.iter().all(|c| c.len() == codes[0].len() && !c.is_empty()));
+        let (levels, _) = codec.layout().unpack::<3>(&refs(&codes));
+        assert_eq!(levels.ncols(), codec.index_bits() + 256);
         let r = refs(&codes);
         let scored = codec.score(&model, q.view(), &r);
         assert_eq!(scored.dim(), (4, 30));
         assert!(scored.iter().all(|s| s.is_finite()));
         assert_eq!(scored, codec.score(&model, q.view(), &r));
+        let recon = codec.reconstruct(&model, &r);
+        assert_eq!(recon.dim(), v.dim());
+        assert!(recon.iter().all(|s| s.is_finite()));
+    }
+
+    /// A list id past 256 is extra 1-bit fields, not an 8-bit code.
+    #[test]
+    fn list_id_packs_past_eight_bits() {
+        let mut rng = math::seed(7);
+        let d = 8;
+        let k = 300;
+        let v: Array2<f32> = math::gaussian(&mut rng, (k, d));
+        let q: Array2<f32> = math::gaussian(&mut rng, (2, d));
+        let codec = c_rabitq(k, 1, d).unwrap();
+        assert!(codec.index_bits() > 8);
+        let model = codec.fit(v.view(), None);
+        let codes = codec.encode(&model, v.view());
+        let centroids = unpack_state(&model);
+        let idx = math::nearest_centroid(v.view(), centroids.view());
+        let (levels, _) = codec.layout().unpack::<3>(&refs(&codes));
+        assert_eq!(levels.ncols(), codec.index_bits() + codec.width);
+        for (i, row) in levels.rows().into_iter().enumerate() {
+            assert_eq!(read_index(row, codec.index_bits()), idx[i] as usize);
+        }
+        let r = refs(&codes);
+        let scored = codec.score(&model, q.view(), &r);
+        assert!(scored.iter().all(|s| s.is_finite()));
         let recon = codec.reconstruct(&model, &r);
         assert_eq!(recon.dim(), v.dim());
         assert!(recon.iter().all(|s| s.is_finite()));
@@ -456,13 +656,13 @@ mod tests {
                 vec![
                     Box::new(Kmeans::new(8, 1)),
                     Box::new(Normalize),
-                    super::Rotation::Hadamard.stage(1),
+                    super::super::rotation::Rotation::Hadamard.stage(1),
                     Box::new(CastAngular::new(1)),
                 ],
             )
             .unwrap(),
         );
-        let custom = c_rabitq(8, "hadamard", 1, d).unwrap();
+        let custom = c_rabitq(8, 1, d).unwrap();
         let ma = angular.fit(v.view(), None);
         let mc = custom.fit(v.view(), None);
         let sa = angular.score(&ma, q.view(), &refs(&angular.encode(&ma, v.view())));
@@ -479,15 +679,14 @@ mod tests {
         let d = 128;
         let v: Array2<f32> = math::gaussian(&mut rng, (160, d));
         let q: Array2<f32> = math::gaussian(&mut rng, (16, d));
-        for rotation in ["full", "hadamard"] {
-            let codec = c_rabitq(16, rotation, 1, d).unwrap();
-            let model = codec.fit(v.view(), None);
-            let codes = codec.encode(&model, v.view());
-            let scored = codec.score(&model, q.view(), &refs(&codes));
-            let exact = q.dot(&v.t());
-            let se: f32 = scored.iter().zip(exact.iter()).map(|(e, t)| e * t).sum();
-            let st: f32 = exact.iter().map(|t| t * t).sum();
-            assert!(((se / st) - 1.0).abs() < 0.25, "{rotation} slope {}", se / st);
-        }
+        let codec = c_rabitq(16, 1, d).unwrap();
+        assert_eq!(codec.width, 256);
+        let model = codec.fit(v.view(), None);
+        let codes = codec.encode(&model, v.view());
+        let scored = codec.score(&model, q.view(), &refs(&codes));
+        let exact = q.dot(&v.t());
+        let se: f32 = scored.iter().zip(exact.iter()).map(|(e, t)| e * t).sum();
+        let st: f32 = exact.iter().map(|t| t * t).sum();
+        assert!(((se / st) - 1.0).abs() < 0.25, "slope {}", se / st);
     }
 }
